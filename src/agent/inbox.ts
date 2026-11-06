@@ -17,6 +17,9 @@ export interface Take{
   statusLines:string[];
   /** Done or Skipped: the agent has finished with it. */
   finished:boolean;
+  /** When this take answers an agent's question: the asking take's id, and the question. */
+  replyTo:string|null;
+  question:string|null;
 }
 
 const read=(file:string)=>{try{return readFileSync(file,'utf8');}catch{return null;}};
@@ -46,6 +49,8 @@ export function readTake(root:string,id:string):Take|null{
     status,
     statusLines:(statusText??'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean),
     finished:isFinal(status),
+    replyTo:typeof context?.replyTo==='string'&&isId(context.replyTo)?context.replyTo:null,
+    question:typeof context?.question==='string'?context.question:null,
   };
 }
 
@@ -123,7 +128,9 @@ export class TakeTracker{
 
 /** The watcher's one line for a take: `FEEDBACK <id> [summary]: what was said`. */
 export function describe(take:Take){
-  const said=take.transcript!==null?(take.transcript||'(silence)')
-    :take.voice?`(no transcript: listen to ${take.voice})`:'(no voice: view and context only)';
-  return `FEEDBACK ${take.id}${take.summary?` [${take.summary}]`:''}: ${said.replace(/\s+/g,' ')}`;
+  const said=(take.transcript!==null?(take.transcript||'(silence)')
+    :take.voice?`(no transcript: listen to ${take.voice})`:'(no voice: view and context only)').replace(/\s+/g,' ');
+  // An answer to the agent's question: carry on with the asking take, which the headset follows.
+  if(take.replyTo)return `ANSWER ${take.id} to ${take.replyTo}${take.question?` [${take.question}]`:''}: ${said}`;
+  return `FEEDBACK ${take.id}${take.summary?` [${take.summary}]`:''}: ${said}`;
 }

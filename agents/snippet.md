@@ -5,23 +5,25 @@ The player tests this app in a VR/MR headset and speaks feedback while playing. 
 - `view.png`: what the player saw as they started talking (the status label and menu are left out; in passthrough the room is grey).
 - `voice.*`: the recording. `transcript.txt`: its transcript, when a transcriber runs; it can be missing or misheard.
 - `context.json`: what the app was doing (`summary`, `app`), head position and direction, the page, the last console errors, the take's length.
-- `status.txt`: yours to write. Each line you add shows in the player's view as "Agent: <line>".
+- `status.txt`: yours to write. Each line you add shows in the player's view as "Agent: <line>", and `Question`, `Done` and `Skipped` lines are also read aloud to them.
 
 Takes are personal data. Never move, delete, upload or commit them; `feedback/` stays out of git.
 
 ### Live mode ("watch the feedback")
 
-Get takes one at a time, while the player keeps the headset on: call the MCP tool `next_feedback` in a loop, or run `npx jxrvis-watch` and act on each `FEEDBACK <id> [<summary>]: <transcript>` line it prints.
+Get takes one at a time, while the player keeps the headset on: call the MCP tool `next_feedback` in a loop, or run `npx jxrvis-watch` and act on each `FEEDBACK <id> [<summary>]: <transcript>` (or `ANSWER …`) line it prints.
 
 For each take:
 
 1. Look at the view and the context before deciding what the player meant. The transcript alone is often not enough.
 2. At once, write `On it: <what you understood>`.
 3. **Small, safe fix** (wording, colour, size, position, timing, an obvious bug in one place, something the tests cover): make it without waiting for a go, run the checks, then write `Done: <what changed>, reload to see`.
-4. **Large, risky or ambiguous** (several systems, deleting things, data or dependencies, a design choice, unclear meaning, an unreadable transcript): write `Question: <short question>`, ask the same in your chat with what you saw, and change nothing for that take until you get an answer.
+4. **Large, risky or ambiguous** (several systems, deleting things, data or dependencies, a design choice, unclear meaning, an unreadable transcript): write `Question: <short question>`, ask the same in your chat with what you saw, and change nothing for that take until you get an answer. Ask so it can be answered in a few words ("Lock the door or remove it?").
 5. Not acting on it (not a problem, a duplicate, out of scope): write `Skipped: <why>`.
 
-Status lines: one line each, under 70 characters, in plain words the player can read in the headset. No file paths or code. `Done` and `Skipped` end a take; the headset stops checking it.
+**Answers.** The player hears your question and answers it by voice with their next take. That take's context has `replyTo` (the asking take's id) and `question`; `next_feedback` returns it with `answers` and `next`, and the watcher prints it as `ANSWER <id> to <asking id> [<question>]: <transcript>`. Continue on the **asking** take: write your next status (`On it`, `Done`, or another `Question`) to the asking take's `status.txt`, because that is the take the headset follows. Mark the answer take `Done: answer to <asking id>`; the headset does not show it. An answer in your chat counts too.
+
+Status lines: one line each, under 70 characters, in plain words the player can read in the headset and understand when heard. No file paths or code. `Done` and `Skipped` end a take; the headset stops checking it.
 
 The dev server reloads the page when code changes, so the player may see a reload on its own. Do not restart or reconfigure the dev server during live mode without asking: that drops the player's session.
 

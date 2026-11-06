@@ -181,3 +181,74 @@ test('the label keeps a short line whole and breaks a long one into two at a spa
   assert.equal(long.length,2);assert.ok(long[1].endsWith('…'));assert.ok(long.every(line=>line.length<=42));
   assert.deepEqual(wrap('a\n  b'),['a b']);
 });
+
+test('Question, Done and Skipped are read aloud; On it only plays the status sound',async()=>{
+  const said:string[]=[];
+  const t=await loop({voice:text=>{said.push(text);}});
+  try{
+    t.client.press();await until(()=>t.recorders[0]?.started,'recording');
+    await sleep(30);t.client.release();
+    await until(()=>t.takes().length===1&&t.shown.some(s=>s.startsWith('Saved')),'saved');
+    const folder=join(t.root,t.takes()[0]);
+    writeFileSync(join(folder,'status.txt'),'On it: the door\n');
+    await until(()=>t.shown.at(-1)==='Claude: On it: the door','on it shown');
+    assert.deepEqual(said,[]);
+    writeFileSync(join(folder,'status.txt'),'On it: the door\nDone: door opens, reload to see\n');
+    await until(()=>said.length===1,'done spoken');
+    assert.deepEqual(said,['Done. door opens, reload to see']);
+  }finally{t.close();}
+});
+
+test('the player answers a question by voice: the next take is a reply, and the asking take is still followed',async()=>{
+  const said:string[]=[];
+  const t=await loop({voice:text=>{said.push(text);}});
+  const record=async(n:number)=>{
+    t.client.press();await until(()=>t.recorders.length===n&&t.recorders[n-1].started,'recording');
+    await sleep(30);t.client.release();
+  };
+  try{
+    await record(1);
+    await until(()=>t.takes().length===1&&t.shown.some(s=>s.startsWith('Saved')),'first take saved');
+    const asking=t.takes()[0];
+    writeFileSync(join(t.root,asking,'status.txt'),'Question: lock the door or remove it?\n');
+    await until(()=>said.length===1,'question spoken');
+    assert.equal(said[0],'Question. lock the door or remove it? Hold the talk button to answer.');
+    assert.deepEqual(t.client.question,{id:asking,text:'Question: lock the door or remove it?'});
+    await record(2);
+    assert.equal(t.shown.find(s=>s.startsWith('● '))?.startsWith('● Recording'),true);
+    await until(()=>t.shown.at(-1)?.startsWith('Answer sent')??false,'answer sent');
+    assert.equal(t.shown.at(-1),'Answer sent: “the door does not open”');
+    assert.ok(t.shown.includes('● Answering… let go to send'));
+    const reply=t.takes().find(id=>id!==asking)!;
+    const context=JSON.parse(readFileSync(join(t.root,reply,'context.json'),'utf8'));
+    assert.equal(context.replyTo,asking);assert.equal(context.question,'Question: lock the door or remove it?');
+    assert.equal(t.client.question,undefined,'one answer per question');
+    writeFileSync(join(t.root,reply,'status.txt'),'Done: answer to '+asking+'\n');
+    writeFileSync(join(t.root,asking,'status.txt'),'Question: lock the door or remove it?\nDone: door removed, reload to see\n');
+    await until(()=>said.length===2,'done on the asking take spoken');
+    assert.equal(said[1],'Done. door removed, reload to see');
+    assert.ok(!t.shown.some(s=>s.includes('answer to')),'the reply take is not followed');
+    await record(3);
+    await until(()=>t.takes().length===3&&t.shown.at(-1)?.startsWith('Saved')===true,'third take saved');
+    const third=t.takes().find(id=>id!==asking&&id!==reply)!;
+    assert.equal(JSON.parse(readFileSync(join(t.root,third,'context.json'),'utf8')).replyTo,undefined,'after Done, takes are new feedback again');
+  }finally{t.close();}
+});
+
+test('speech can be turned off, or replaced with your own speaker',async()=>{
+  const said:string[]=[];
+  const t=await loop({voice:'off'});
+  try{
+    t.client.press();await until(()=>t.recorders[0]?.started,'recording');
+    await sleep(30);t.client.release();
+    await until(()=>t.takes().length===1&&t.shown.some(s=>s.startsWith('Saved')),'saved');
+    writeFileSync(join(t.root,t.takes()[0],'status.txt'),'Done: fixed\n');
+    await until(()=>t.shown.at(-1)==='Claude: Done: fixed','shown');
+    assert.equal(t.client.voice,'off');
+    t.client.voice=text=>{said.push(text);};
+    assert.deepEqual(said,[]);
+  }finally{t.close();}
+  const {spoken}=await import('../src/client/core.ts');
+  assert.equal(spoken('Skipped:   not   a bug'),'Skipped. not a bug');
+  assert.equal(spoken('Fine'),'Fine');
+});

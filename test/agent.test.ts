@@ -129,3 +129,36 @@ test('the MCP server hands out takes, lists them and writes status lines, over s
     assert.equal(one.content.length,1);assert.deepEqual(JSON.parse(one.content[0].text).statusLines,['On it: a bigger ball']);
   }finally{await client.close();}
 });
+
+test('an answer to a question reads back with what it answers, and the watcher says ANSWER',()=>{
+  const root=inbox();
+  take(root,'2026-11-03_18-42-07',{transcript:'the door is wrong'});
+  setStatus(root,'2026-11-03_18-42-07','Question: lock the door or remove it?');
+  take(root,'2026-11-03_18-43-00',{transcript:'remove it',context:{replyTo:'2026-11-03_18-42-07',question:'Question: lock the door or remove it?'}});
+  const answer=readTake(root,'2026-11-03_18-43-00')!;
+  assert.equal(answer.replyTo,'2026-11-03_18-42-07');assert.equal(answer.question,'Question: lock the door or remove it?');
+  assert.equal(describe(answer),'ANSWER 2026-11-03_18-43-00 to 2026-11-03_18-42-07 [Question: lock the door or remove it?]: remove it');
+  take(root,'2026-11-03_18-44-00',{transcript:'x',context:{replyTo:'../../etc'}});
+  assert.equal(readTake(root,'2026-11-03_18-44-00')!.replyTo,null,'a malformed replyTo is ignored');
+});
+
+test('over MCP, an answer comes with the asking take and what to do next',async()=>{
+  const root=inbox();
+  take(root,'2026-11-03_18-42-07',{transcript:'the door is wrong'});
+  setStatus(root,'2026-11-03_18-42-07','Question: lock the door or remove it?');
+  const transport=new StdioClientTransport({command:process.execPath,args:['--experimental-strip-types','--no-warnings',bin('mcp'),'--inbox',root],stderr:'pipe'});
+  const client=new Client({name:'test',version:'1'});
+  await client.connect(transport);
+  try{
+    assert.match(client.getInstructions()??'',/replyTo/);
+    const next=client.callTool({name:'next_feedback',arguments:{timeout_seconds:10,include_view:false}});
+    await sleep(200);
+    take(root,'2026-11-03_18-43-00',{transcript:'remove it',context:{replyTo:'2026-11-03_18-42-07',question:'Question: lock the door or remove it?'}});
+    const got=await next as {content:{text:string}[]};
+    const info=JSON.parse(got.content[0].text);
+    assert.equal(info.replyTo,'2026-11-03_18-42-07');
+    assert.equal(info.answers.transcript,'the door is wrong');
+    assert.deepEqual(info.answers.statusLines,['Question: lock the door or remove it?']);
+    assert.match(info.next,/set_status on 2026-11-03_18-42-07/);
+  }finally{await client.close();}
+});

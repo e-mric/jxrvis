@@ -2,7 +2,7 @@
 
 **Talk to your AI coding agent from inside the headset.**
 
-You are testing your WebXR app on a Quest. Something looks wrong. Hold **B**, say what it is, let go. jXRvis saves what your eyes saw, what you said and what the app was doing to a folder on your dev PC. Your agent (Claude Code, Codex, Cursor, Aider, a script) picks the take up, fixes the code, and answers in your view: *"Agent: Done: ball moved down, reload to see."* You never take the headset off.
+You are testing your WebXR app on a Quest. Something looks wrong. Hold **B**, say what it is, let go. jXRvis saves what your eyes saw, what you said and what the app was doing to a folder on your dev PC. Your agent (Claude Code, Codex, Cursor, Aider, a script) picks the take up, fixes the code, and answers in your view and in your ear: *"Done. Ball moved down, reload to see."* When it is not sure, it asks (*"Question. Lock the door or remove it? Hold the talk button to answer."*), and you answer by voice the same way. You never take the headset off.
 
 ```
  headset (WebXR page)                      dev PC
@@ -110,6 +110,7 @@ const feedback = attachFeedback({
   holdButtons: [{hand: 'right', button: 5}, {hand: 'left', button: 5}],  // B and Y (default)
   key: 'f',                                             // desktop hold-to-talk (default); null for none
   sound: event => sfx.play(event),                      // 'start' | 'saved' | 'status' | 'error'
+  voice: 'auto',                                        // read replies aloud; 'off' to mute (see Voice)
   onMessage: text => console.info(text),                // the same messages, outside XR
 });
 
@@ -122,6 +123,20 @@ menuButton.onClick = () => feedback.toggle();           // a menu "Feedback" but
 ```
 
 Hold B/Y (or F): the view is taken as the button goes down, the voice records until you let go. A menu toggle takes the view 1.5 s later, so you can look back at the scene. Takes under 0.4 s are dropped; recordings stop at 90 s. All of this is in `timing`.
+
+#### Voice: hearing the agent, answering it
+
+Your eyes are on the scene, so the agent's replies are spoken as well as shown. `Question`, `Done` and `Skipped` lines are read aloud ("Done. Ball moved down, reload to see"); `On it` only plays the `status` sound. Speech stops when you start recording, so the agent's voice never ends up in your take.
+
+When the agent asks a `Question`, it is read with a hint ("Hold the talk button to answer"). Your next take is recorded as the answer: the label says "Answering…", and the take's context gets `replyTo` (the asking take) and `question`. The agent sees it as an answer and carries on with the original take, whose status you keep following, so the conversation goes *you talk → it asks → you answer → "Done"* without leaving the headset.
+
+Where the voice comes from (`voice` option):
+
+- `'auto'` (default): the server's speech route when it has one, else the browser's own text-to-speech (Web Speech API, no network).
+- `'browser'`, `'server'`, `'off'`, or your own `text => …` function (an in-game character, a spatial audio source). `feedback.client.voice = 'off'` mutes it at runtime.
+- `voiceLang: 'en-US'` picks the browser voice's language; `speakPrefixes` picks which statuses are spoken.
+
+If the headset's browser has no voices installed, give the server one: `speech: 'http://127.0.0.1:5002/speak'` (Vite plugin, middleware) or `--speech <url>` (standalone). Any local text-to-speech server that takes `POST {"text": "…"}` and answers WAV, MP3, OGG or WebM audio fits (Piper, Kokoro, Coqui behind a small wrapper), or pass a function `speech: async text => ({audio, type: 'audio/wav'})`. The headset then plays the audio the PC makes, and nothing leaves the PC.
 
 ### 3b. Client (any engine)
 
@@ -167,7 +182,7 @@ Then tell the agent "watch the feedback".
 npx jxrvis-watch --inbox feedback/inbox
 ```
 
-It prints `FEEDBACK <id> [<summary>]: <transcript>` once per new take, when the transcript is in.
+It prints `FEEDBACK <id> [<summary>]: <transcript>` once per new take, when the transcript is in, and `ANSWER <id> to <asking id> [<question>]: <transcript>` when the player answers one of the agent's questions.
 
 **Plain files**: any agent can list `feedback/inbox/`, read a take and append a line to its `status.txt`. That is the whole contract.
 

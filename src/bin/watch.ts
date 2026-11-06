@@ -21,6 +21,7 @@ if(values.help){
   --once                report what is ready now and exit
 
 Each line: FEEDBACK <id> [<summary>]: <transcript>
+       or: ANSWER <id> to <asking id> [<your question>]: <transcript>   (the player answering you)
 The take's files are in <inbox>/<id>/ (view.png, voice.*, transcript.txt, context.json).
 Answer the headset by writing status lines to <inbox>/<id>/status.txt (see AGENTS.md).`);
   process.exit(0);

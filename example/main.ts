@@ -48,6 +48,8 @@ const feedback=attachFeedback({
   onMessage:text=>{message.textContent=text;},
 });
 toggle.addEventListener('click',()=>feedback.toggle());
+const speak=document.getElementById('speak') as HTMLInputElement;
+speak.addEventListener('change',()=>{feedback.client.voice=speak.checked?'auto':'off';});
 // For debugging and automated checks from the console.
 Object.assign(window,{jxrvis:feedback});
 

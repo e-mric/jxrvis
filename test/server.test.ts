@@ -50,7 +50,7 @@ test('a take keeps what the player saw, what they said and its transcript in one
 test('with no transcriber a take keeps its voice and gets no transcript',async()=>{
   const {root,base,close}=await inbox({transcribe:'none'});
   try{
-    assert.deepEqual(await fetch(`${base}/api/feedback/health`).then(r=>r.json()),{ok:true,transcriber:'none'});
+    assert.deepEqual(await fetch(`${base}/api/feedback/health`).then(r=>r.json()),{ok:true,transcriber:'none',speech:'none'});
     const {id}=await view(base).then(r=>r.json()) as {id:string};
     assert.deepEqual(await (await voice(base,id,'audio/ogg')).json(),{id,transcript:null});
     assert.deepEqual(readdirSync(join(root,id)).sort(),['context.json','view.png','voice.ogg']);
@@ -216,4 +216,41 @@ test('the standalone server speaks plain HTTP without a certificate, for localho
     assert.equal((await fetch(`${url}/`)).status,404,'no static folder, no page');
   }finally{await server.close();}
   assert.throws(()=>createFeedbackServer({root:temp(),cert:'x.pem'}),/both/);
+});
+
+test('the optional speech route speaks a status line as audio, and is absent without an engine',async()=>{
+  const said:string[]=[];
+  const {base,close}=await inbox({speech:async text=>{said.push(text);return {audio:new Uint8Array([82,73,70,70]),type:'audio/wav'};}});
+  const speak=(body:unknown,b=base)=>fetch(`${b}/api/feedback/speech`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  try{
+    assert.equal((await fetch(`${base}/api/feedback/health`).then(r=>r.json()) as {speech:string}).speech,'speech');
+    const reply=await speak({text:'  Done. Ball moved down. '});
+    assert.equal(reply.status,200);assert.equal(reply.headers.get('content-type'),'audio/wav');
+    assert.deepEqual(new Uint8Array(await reply.arrayBuffer()),new Uint8Array([82,73,70,70]));
+    assert.deepEqual(said,['Done. Ball moved down.']);
+    assert.equal((await speak({text:''})).status,400);
+    assert.equal((await speak({text:'x'.repeat(1001)})).status,400);
+    assert.equal((await speak({text:'hi'},base)).status,200);
+  }finally{close();}
+  const failing=await inbox({speech:async()=>{throw new Error('voice model missing');}});
+  try{assert.equal((await speak({text:'hi'},failing.base)).status,502);}finally{failing.close();}
+  const none=await inbox();
+  try{assert.equal((await speak({text:'hi'},none.base)).status,404);}finally{none.close();}
+});
+
+test('an HTTP speech server gets the text as JSON and must answer audio',async()=>{
+  const {httpSpeech}=await import('../src/server/speech.ts');
+  let got='';
+  const fake=createServer(async(req,res)=>{
+    const chunks:Buffer[]=[];for await(const c of req)chunks.push(c as Buffer);got=Buffer.concat(chunks).toString();
+    if(req.url==='/html'){res.writeHead(200,{'Content-Type':'text/html'});res.end('<p>');return;}
+    res.writeHead(200,{'Content-Type':'audio/mpeg'});res.end(Buffer.from('mp3'));
+  });
+  fake.listen(0,'127.0.0.1');await once(fake,'listening');
+  const url=`http://127.0.0.1:${(fake.address() as {port:number}).port}`;
+  try{
+    const {audio,type}=await httpSpeech(`${url}/tts`).speak('hola');
+    assert.equal(type,'audio/mpeg');assert.equal(Buffer.from(audio).toString(),'mp3');assert.deepEqual(JSON.parse(got),{text:'hola'});
+    await assert.rejects(httpSpeech(`${url}/html`).speak('x'),/not audio/);
+  }finally{fake.close();}
 });

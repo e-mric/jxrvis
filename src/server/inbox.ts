@@ -3,6 +3,7 @@ import type {IncomingMessage} from 'node:http';
 import type {Http2ServerRequest} from 'node:http2';
 import {join} from 'node:path';
 import {DEFAULT_BASE,FILES,VOICE_TYPES,currentStatus,isId,stamp} from '../spec.ts';
+import {resolveSpeech,type SpeechOption} from './speech.ts';
 import {resolveTranscriber,type TranscriberOption} from './transcribers.ts';
 
 const IMAGE=/^data:image\/(png|jpeg);base64,/;
@@ -12,6 +13,8 @@ export interface InboxOptions{
   root:string;
   /** 'none' (default), a transcription server URL, a function or a Transcriber. */
   transcribe?:TranscriberOption;
+  /** 'none' (default: headsets use their own voice), a text-to-speech server URL, a function or a Speech. */
+  speech?:SpeechOption;
   /** URL path the routes live under. */
   base?:string;
   maxViewBytes?:number;
@@ -40,8 +43,8 @@ async function body(req:Request,limit:number){
  * The inbox's HTTP routes (SPEC.md) as a connect-style handler: Vite, Express, connect, or a plain
  * node:http / node:http2 server. Requests outside `base` go to `next`.
  */
-export function feedbackInbox({root,transcribe,base=DEFAULT_BASE,maxViewBytes=16e6,maxVoiceBytes=30e6,log=()=>{},now=()=>new Date()}:InboxOptions):Handler{
-  const transcriber=resolveTranscriber(transcribe);
+export function feedbackInbox({root,transcribe,speech:speechOption,base=DEFAULT_BASE,maxViewBytes=16e6,maxVoiceBytes=30e6,log=()=>{},now=()=>new Date()}:InboxOptions):Handler{
+  const transcriber=resolveTranscriber(transcribe),speech=resolveSpeech(speechOption);
   const prefix=base.replace(/\/$/,'');
   const ensureRoot=()=>{
     mkdirSync(root,{recursive:true});
@@ -64,7 +67,20 @@ export function feedbackInbox({root,transcribe,base=DEFAULT_BASE,maxViewBytes=16
     }
     const rest=path.slice(prefix.length);
     try{
-      if(req.method==='GET'&&rest==='/health')return reply(200,{ok:true,transcriber:transcriber.name});
+      if(req.method==='GET'&&rest==='/health')return reply(200,{ok:true,transcriber:transcriber.name,speech:speech?.name??'none'});
+      if(req.method==='POST'&&rest==='/speech'){
+        if(!speech)return reply(404,{error:'No speech engine on this server'});
+        let text:unknown;
+        try{({text}=JSON.parse((await body(req,8000)).toString()));}catch(error){if((error as {status?:number}).status)throw error;return reply(400,{error:'The body must be JSON'});}
+        if(typeof text!=='string'||!text.trim()||text.length>1000)return reply(400,{error:'text must be 1 to 1000 characters'});
+        try{
+          const {audio,type}=await speech.speak(text.trim());
+          res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store'});res.end(audio);return;
+        }catch(error){
+          log(`speech failed: ${String((error as Error)?.message??error).slice(0,200)}`);
+          return reply(502,{error:'Speech failed'});
+        }
+      }
       if(req.method==='POST'&&(rest===''||rest==='/')){
         let parsed:{image?:unknown;context?:unknown};
         const raw=await body(req,maxViewBytes);

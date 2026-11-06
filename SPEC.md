@@ -62,6 +62,8 @@ The server adds `savedAt` and `transcriber`. Clients should send the other field
 | `userAgent` | string | Browser or engine/device. |
 | `recentErrors` | string[] | The last console errors in the app, newest last. |
 | `app` | object | Whatever the host app supplies (mode, level, selection, …). |
+| `replyTo` | string | Set when the take answers an agent's question: the id of the take whose current status was that `Question`. See [Replies](#replies). |
+| `question` | string | With `replyTo`: the `Question: …` line being answered. |
 
 ## Status lines
 
@@ -81,6 +83,14 @@ Rules:
 - Write the line in one write call (write a temporary file and rename, or a single `write`), so a reader never sees half a line.
 - Lines with another prefix are allowed but clients only stop following on `Done` and `Skipped`. (This repo's MCP tool only writes the four.)
 
+## Replies
+
+When a take's current status is a `Question: …`, the player answers by recording another take. The client marks that take with `replyTo` (the asking take's id) and `question` in its context. The reply is an ordinary take folder; only its context says what it answers.
+
+- The agent continues on the **asking** take: it writes the next status (`On it`, `Done`, another `Question`) to the asking take's `status.txt`, because that is the take the headset follows.
+- The reply take needs no visible status. The agent marks it handled with `Done: answer to <id>` so it does not show as pending; the headset does not follow reply takes.
+- A client marks at most one take as a reply per question, and stops treating new takes as replies once the asking take gets a status that is not a `Question`.
+
 ## When a take is ready for an agent
 
 A folder appears as soon as the view arrives, and the voice and transcript follow seconds or minutes later. An agent watching the inbox should start on a take when:
@@ -98,10 +108,11 @@ Served by the dev server the headset page comes from (same origin), under a base
 
 | Method and path | Request | Reply |
 | --- | --- | --- |
-| `GET {base}/health` | — | `200 {"ok":true,"transcriber":"none"\|"<name>"}` |
+| `GET {base}/health` | — | `200 {"ok":true,"transcriber":"none"\|"<name>","speech":"none"\|"<name>"}` |
 | `POST {base}` | `Content-Type: application/json`, body `{"image":"data:image/png;base64,…","context":{…}}`. `image` must be a PNG or JPEG data URL. Up to 16 MB. | `200 {"id":"…"}`. The take folder now holds the view and context. |
 | `POST {base}/{id}/voice` | Body is the raw audio, `Content-Type` one of the audio types above (parameters such as `;codecs=opus` are allowed). Up to 30 MB. | `200 {"id":"…","transcript":"…"}`, or `200 {"id":"…","transcript":null}` with no transcriber, or `200 {"id":"…","transcript":null,"error":"…"}` when transcription failed (the voice is kept). |
 | `GET {base}/{id}/status` | — | `200 {"status":"On it: …"}` (the current status) or `200 {"status":null}` before the agent writes one. |
+| `POST {base}/speech` | Optional. `Content-Type: application/json`, body `{"text":"…"}`, up to 1000 characters. | `200` with the text spoken as audio (`audio/wav`, `audio/mpeg`, `audio/ogg` or `audio/webm`), for clients that cannot synthesise speech themselves. `404` when the server has no speech engine (`"speech":"none"` in health). |
 
 Errors: `400 {"error":"…"}` for a bad body or unsupported audio type, `403` for a foreign origin, `404` for an unknown or malformed id or route, `413` for a body over the limit. Any path under the base that is not listed answers 404; paths outside the base are left to the rest of the server.
 
@@ -125,3 +136,5 @@ Not part of the wire contract, but every client should behave alike so players c
 - A label low in the player's view (head-locked, about 0.7 m ahead and 0.2 m down) says what is happening: recording, saving, the transcript, then each new status as `<Agent>: <status>`.
 - After saving, poll `GET {base}/{id}/status` every 3 s for up to 20 minutes, until the status starts with `Done` or `Skipped`.
 - If `GET {base}/health` fails, say that feedback needs the dev server, and do nothing else.
+- **Spoken status**: `Question`, `Done` and `Skipped` lines are also read aloud (the player's eyes are busy), with the prefix spoken as a word ("Done. Ball moved down…"); `On it` gets a short sound only. A question ends with a hint on how to answer ("Hold the talk button to answer."). Clients use the server's `POST {base}/speech` when health reports a speech engine, else the platform's own text-to-speech, else stay silent. Players can turn speech off.
+- **Replies**: while a followed take's current status is a `Question`, the next take is recorded as a reply (`replyTo` and `question` in its context, label "Answering…"). It is not followed itself; the client keeps following the asking take.
