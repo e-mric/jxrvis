@@ -59,7 +59,11 @@ Until it is on npm, install from GitHub (the `prepare` script builds it):
 npm install --save-dev github:e-mric/jxrvis
 ```
 
+npm builds it while fetching it from git. Recent npm versions may then warn that jxrvis has a `prepare` script "not yet covered by allowScripts"; the package is already built, so the warning can be ignored (or silenced with `npm install-scripts approve jxrvis`).
+
 Or from a local clone, after `npm install` in the clone: `npm install --save-dev ../jxrvis`.
+
+The three.js adapter expects `three` (r160 or later) in your project; the rest has no 3D dependency.
 
 Add the feedback folder to your `.gitignore` (the inbox ignores itself, but fix notes live next to it):
 
