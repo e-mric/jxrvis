@@ -223,6 +223,13 @@ npm run verify
 
 `verify` typechecks, runs the tests, builds the package and builds the example. TypeScript sources run directly under Node (`--experimental-strip-types`); `npm run build` writes `dist/`.
 
+## Related
+
+- **IWSDK's AI-assisted dev tooling** ([docs](https://developers.meta.com/horizon/documentation/web/iwsdk-ai-assisted-dev-tooling)): an MCP server beside Vite that lets an agent take canvas screenshots, read console logs, reload and drive emulated headset input. It is the agent looking at the app; jXRvis is the *player* in a real headset telling the agent what they saw, and hearing back. They work well together, and jXRvis does not duplicate those screenshot or control tools.
+- **Meta's in-headset playtesting feedback**: captures and voice from the headset, sent to the Developer Dashboard for people to read. No agent, no live answer in the headset.
+- **talkthrough-mcp**: narrated desktop screen recordings turned into issue drafts by a local MCP server.
+- **MCPFeedback, MarkLayer** and similar: annotated web screenshots as bug reports for agents.
+
 ## Status
 
 Version 0.1, extracted from the live feedback loop of a Quest 3 mixed-reality game, where the same loop is in use. As a package it is verified on desktop: the example page saves takes end to end (view, voice, context, Whisper transcript) and follows status lines. It has not yet been run on a Quest in this packaged form; the XR code paths (eye view of the left eye, B/Y buttons, head-locked label) are ported from the game, where they run on Quest 3.
