@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jXRvis example</title>
+  <style>
+    html,body{margin:0;height:100%;background:#20232a;color:#f3f1ea;font:15px/1.4 system-ui,sans-serif;overflow:hidden}
+    #panel{position:fixed;left:16px;top:16px;max-width:min(420px,calc(100vw - 32px));background:#000a;padding:12px 14px;border-radius:12px}
+    #panel h1{font-size:17px;margin:0 0 6px}
+    #panel p{margin:4px 0}
+    #panel button{font:inherit;margin:6px 6px 0 0;padding:6px 12px;border-radius:8px;border:1px solid #fff4;background:#ffffff14;color:inherit;cursor:pointer}
+    #panel button[aria-pressed=true]{background:#d33;border-color:#d33}
+    #message{margin-top:8px;min-height:1.4em;font-weight:600}
+    kbd{background:#fff2;border-radius:4px;padding:0 5px}
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <h1>jXRvis example</h1>
+    <p>Hold <kbd>F</kbd> (or <b>B</b>/<b>Y</b> in the headset) and say what is wrong. Let go to save.</p>
+    <p>Takes go to <code>example/feedback/inbox</code>.</p>
+    <button id="toggle" aria-pressed="false">Record</button>
+    <label><input type="checkbox" id="synthetic"> Synthetic voice (no microphone)</label>
+    <div id="message" role="status" aria-live="polite"></div>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

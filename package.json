@@ -1,0 +1,100 @@
+{
+  "name": "jxrvis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "jXRvis: talk to your AI coding agent from inside the headset. Your eye view, voice and app context land in a local inbox; the agent fixes things live and answers in your view.",
+  "type": "module",
+  "exports": {
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "default": "./dist/server/index.js"
+    },
+    "./vite": {
+      "types": "./dist/server/vite.d.ts",
+      "default": "./dist/server/vite.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./three": {
+      "types": "./dist/client/three.d.ts",
+      "default": "./dist/client/three.js"
+    },
+    "./agent": {
+      "types": "./dist/agent/inbox.d.ts",
+      "default": "./dist/agent/inbox.js"
+    },
+    "./spec": {
+      "types": "./dist/spec.d.ts",
+      "default": "./dist/spec.js"
+    }
+  },
+  "bin": {
+    "jxrvis-server": "dist/bin/server.js",
+    "jxrvis-watch": "dist/bin/watch.js",
+    "jxrvis-mcp": "dist/bin/mcp.js"
+  },
+  "files": [
+    "dist",
+    "tools",
+    "agents",
+    "SPEC.md",
+    "AGENTS.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test \"test/*.test.ts\"",
+    "example": "vite example",
+    "example:headset": "vite example --mode headset --host 0.0.0.0",
+    "verify": "npm run typecheck && npm test && npm run build && vite build example",
+    "prepare": "npm run build"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "three": "^0.187.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-mric/jxrvis.git"
+  },
+  "homepage": "https://github.com/e-mric/jxrvis#readme",
+  "bugs": {
+    "url": "https://github.com/e-mric/jxrvis/issues"
+  },
+  "keywords": [
+    "webxr",
+    "vr",
+    "mr",
+    "xr",
+    "quest",
+    "three.js",
+    "feedback",
+    "ai-agent",
+    "mcp",
+    "claude-code",
+    "playtest",
+    "whisper"
+  ],
+  "peerDependencies": {
+    "three": ">=0.160.0"
+  },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    }
+  }
+}

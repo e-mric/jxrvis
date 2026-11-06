@@ -1,0 +1,12 @@
+node_modules/
+dist/
+example/dist/
+.claude/
+.env*
+# Feedback data (screenshots, voice, transcripts) never leaves the PC it was recorded on.
+feedback/
+**/feedback/inbox/
+*.pem
+!test/fixtures/*.pem
+__pycache__/
+.venv/
