@@ -35,7 +35,7 @@ git clone https://github.com/e-mric/jxrvis.git
 cd jxrvis && npm install && npm run example
 ```
 
-Open http://localhost:5173, hold **F**, talk, let go. Tick **Synthetic voice** if the PC has no microphone: it records a tone through the same path. The take lands in `example/feedback/inbox/<id>/`. Then, from another terminal:
+Open http://localhost:5173, hold **F**, talk, let go. Tick **Synthetic voice** if the PC has no microphone: it records a tone through the same path, or, with `?synthetic&voiceFile=<url>` (a recording of someone talking, served by Vite from `example/`), plays that file into each take, so transcripts and "take a screenshot" can be tried without speaking. The take lands in `example/feedback/inbox/<id>/`. Then, from another terminal:
 
 ```bash
 npx jxrvis-watch --inbox example/feedback/inbox --include-existing --once
@@ -124,6 +124,15 @@ menuButton.onClick = () => feedback.toggle();           // a menu "Feedback" but
 
 Hold B/Y (or F): the view is taken as the button goes down, the voice records until you let go. A menu toggle takes the view 1.5 s later, so you can look back at the scene. Takes under 0.4 s are dropped; recordings stop at 90 s. All of this is in `timing`.
 
+#### More screenshots while you talk
+
+The first view is taken as you start. While you keep talking you can add more, up to 8 per take:
+
+- **Say "take a screenshot"** (or "take another screenshot", "grab a snapshot", "take a picture"). The client sends what you have said so far to the dev PC every 1.5 s, and the transcriber listens to the newest part. When the phrase shows up, a view is taken. That is about a second after you say it, so keep looking at the thing. This needs a transcriber that can listen: the Whisper server in `tools/` can, and on a GPU it keeps up easily. On a CPU it may lag; use the button.
+- **Press A or X** (desktop: **P**) while recording: a view right away. `shotButtons` and `shotKey` change them; `[]` / `null` turn them off.
+
+The label confirms each one ("● Recording… screenshot 2 taken"). They are saved as `view-2.png`, `view-3.png`, … with `views.json` saying when (seconds into the recording) and how each was taken, so the agent can match them to what you said. `shotPhrase` takes your own regular expression (another language, another wording), or `null` for button only.
+
 #### Voice: hearing the agent, answering it
 
 Your eyes are on the scene, so the agent's replies are spoken as well as shown. `Question`, `Done` and `Skipped` lines are read aloud ("Done. Ball moved down, reload to see"); `On it` only plays the `status` sound. Speech stops when you start recording, so the agent's voice never ends up in your take.
@@ -162,7 +171,7 @@ Copy [agents/snippet.md](agents/snippet.md) into your project's `AGENTS.md` (or 
 
 Then connect the agent to the inbox in one of three ways.
 
-**MCP** (Claude Code, Codex, Cursor, Windsurf, Cline, any MCP client). Tools: `next_feedback` (waits for the next take; returns transcript, context, file paths and the eye view as an image), `list_feedback`, `get_feedback`, `set_status(id, text)`.
+**MCP** (Claude Code, Codex, Cursor, Windsurf, Cline, any MCP client). Tools: `next_feedback` (waits for the next take; returns transcript, context, file paths and every view the player took as images), `list_feedback`, `get_feedback`, `set_status(id, text)`.
 
 ```bash
 claude mcp add jxrvis -- npx jxrvis-mcp --inbox feedback/inbox
@@ -182,7 +191,7 @@ Then tell the agent "watch the feedback".
 npx jxrvis-watch --inbox feedback/inbox
 ```
 
-It prints `FEEDBACK <id> [<summary>]: <transcript>` once per new take, when the transcript is in, and `ANSWER <id> to <asking id> [<question>]: <transcript>` when the player answers one of the agent's questions.
+It prints `FEEDBACK <id> [<summary>] (+N screenshots): <transcript>` once per new take, when the transcript is in, and `ANSWER <id> to <asking id> [<question>]: <transcript>` when the player answers one of the agent's questions.
 
 **Plain files**: any agent can list `feedback/inbox/`, read a take and append a line to its `status.txt`. That is the whole contract.
 
@@ -202,7 +211,7 @@ python -m venv .venv
 .venv/Scripts/python tools/whisper-server.py --model turbo
 ```
 
-(macOS/Linux: `.venv/bin/…`. Needs ffmpeg on PATH. For a GPU, install the CUDA build of torch first. The first start downloads the model; `turbo` is 1.6 GB.) Then set `transcribe: 'http://127.0.0.1:8788/transcribe'`. Options: `--language en` to skip detection, `--prompt "Words your app uses"` for names and jargon, `--model small` for a faster CPU.
+(macOS/Linux: `.venv/bin/…`. Needs ffmpeg on PATH. For a GPU, install the CUDA build of torch first. The first start downloads the model; `turbo` is 1.6 GB.) Then set `transcribe: 'http://127.0.0.1:8788/transcribe'`. It also answers `?from=<seconds>` requests, which the headset uses to hear "take a screenshot" while you talk. Options: `--language en` to skip detection, `--prompt "Words your app uses"` for names and jargon, `--model small` for a faster CPU.
 
 Any function works too: `transcribe: async (audio, {type}) => myService(audio, type)`. Return `null` for "no transcript"; throw and the voice is still kept.
 

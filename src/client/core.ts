@@ -2,7 +2,9 @@ import {DEFAULT_BASE,isFinal,statusPrefix,type StatusPrefix} from '../spec.ts';
 
 /** What a snapshot gives: the eye view as a PNG/JPEG data URL, plus what the adapter knows (xr, head pose). */
 export type Snapshot={image:string;details?:Record<string,unknown>};
-export type FeedbackEvent='start'|'saved'|'status'|'error';
+export type FeedbackEvent='start'|'shot'|'saved'|'status'|'error';
+/** A view taken during a recording, after the first one. */
+export type ExtraView={image:string;seconds:number;trigger:'voice'|'button';head?:unknown};
 
 /** The part of MediaRecorder the client uses, so tests and native shims can stand in for it. */
 export interface RecorderLike{
@@ -23,6 +25,8 @@ export interface Timing{
   /** How often (seconds) and for how long the client follows a saved take's status. */
   followEvery:number;
   followFor:number;
+  /** While recording, how often (seconds) the client asks the server what was said, to hear "take a screenshot". */
+  listenEvery:number;
 }
 
 export interface ClientOptions{
@@ -57,17 +61,25 @@ export interface ClientOptions{
   voiceLang?:string;
   /** Said after a question. */
   answerHint?:string;
+  /** Said during a recording, takes another view. null: only the screenshot button does. */
+  shotPhrase?:RegExp|null;
+  /** Most extra views per take. */
+  maxShots?:number;
 }
+
+/** "take a screenshot", "grab another snapshot", "take one more picture", … */
+export const SHOT_PHRASE=/\b(take|grab|get|make)\s+(a\s+|an\s+|another\s+|one\s+more\s+)?(screen[\s-]?shot|snap[\s-]?shot|picture|photo)\b/i;
 
 export type VoiceMode='auto'|'browser'|'server'|'off';
 export type Speaker=(text:string)=>void|Promise<void>;
 /** A question the agent asked about a take; the next take answers it. */
 export type OpenQuestion={id:string;text:string};
 
-export const DEFAULT_TIMING:Timing={lookUp:1.5,shortest:.4,longest:90,followEvery:3,followFor:20*60};
+export const DEFAULT_TIMING:Timing={lookUp:1.5,shortest:.4,longest:90,followEvery:3,followFor:20*60,listenEvery:1.5};
 const DEFAULT_SPOKEN:StatusPrefix[]=['Question','Done','Skipped'];
 
-type Take={held:boolean;reply?:OpenQuestion;snap?:Promise<Snapshot>;recorder:RecorderLike;chunks:Blob[];started:number;timers:ReturnType<typeof setTimeout>[]};
+type Shot={seconds:number;trigger:ExtraView['trigger'];snap:Promise<Snapshot>};
+type Take={held:boolean;reply?:OpenQuestion;snap?:Promise<Snapshot>;shots:Shot[];heardFrom:number;recorder:RecorderLike;chunks:Blob[];started:number;timers:ReturnType<typeof setTimeout>[]};
 
 /** A status line as it is read aloud: "Done: ball moved" → "Done. ball moved". */
 export function spoken(status:string){
@@ -121,18 +133,20 @@ export function createFeedbackClient(options:ClientOptions){
   const recorder=options.recorder??((stream:MediaStream)=>new MediaRecorder(stream) as unknown as RecorderLike);
   const show=(text:string,seconds=Infinity)=>options.show(text,seconds);
 
-  let healthy:Promise<boolean>|undefined,stream:Promise<MediaStream>|undefined,serverSpeech=false;
+  let healthy:Promise<boolean>|undefined,stream:Promise<MediaStream>|undefined,serverSpeech=false,canListen=false;
   let take:Take|undefined,starting=false,releasedEarly=false,disposed=false,question:OpenQuestion|undefined;
   let voiceMode:VoiceMode|Speaker=options.voice??'auto';
   const following=new Set<AbortController>();
   const speakPrefixes=options.speakPrefixes??DEFAULT_SPOKEN;
   const answerHint=options.answerHint??'Hold the talk button to answer.';
+  const shotPhrase=options.shotPhrase===undefined?SHOT_PHRASE:options.shotPhrase;
+  const maxShots=options.maxShots??8;
 
   const available=()=>{
     healthy??=http(`${base}/health`,{signal:AbortSignal.timeout(3000)})
       .then(async r=>{
         if(!r.ok)return false;
-        try{const {speech}=await r.json() as {speech?:string};serverSpeech=!!speech&&speech!=='none';}catch{}
+        try{const {speech,listen}=await r.json() as {speech?:string;listen?:boolean};serverSpeech=!!speech&&speech!=='none';canListen=listen===true;}catch{}
         return true;
       },()=>false);
     return healthy.then(ok=>{if(!ok)healthy=undefined;return ok;});
@@ -160,6 +174,42 @@ export function createFeedbackClient(options:ClientOptions){
   }
   /** Stops any speech, so the agent's voice does not end up in the player's recording. */
   function hush(){browser?.hush();playing?.pause();}
+
+  /** Another view during the recording, numbered after the first (which is 1). */
+  function addShot(current:Take,trigger:ExtraView['trigger']){
+    if(current.shots.length>=maxShots){show('No more screenshots for this take',2);return false;}
+    const seconds=(now()-current.started)/1000;
+    const snap=Promise.resolve().then(()=>options.snapshot()).then(asSnapshot);
+    snap.catch(()=>{});
+    current.shots.push({seconds,trigger,snap});
+    options.sound?.('shot');
+    const n=current.shots.length+1;
+    show(current.reply?`● Answering… screenshot ${n} taken`:`● Recording… screenshot ${n} taken`);
+    return true;
+  }
+
+  /**
+   * While the player talks, sends the recording so far to the server every `listenEvery` seconds and takes a
+   * view when they say the shot phrase. Each request transcribes only from shortly before where the last one
+   * stopped, so it stays quick; after a hit it starts after the hit, so one phrase gives one view.
+   */
+  async function listen(current:Take){
+    while(take===current){
+      await new Promise(resolve=>setTimeout(resolve,timing.listenEvery*1000));
+      if(take!==current||!current.chunks.length)continue;
+      const upTo=(now()-current.started)/1000;
+      const audio=new Blob(current.chunks,{type:current.recorder.mimeType||'audio/webm'});
+      try{
+        const reply=await http(`${base}/listen?from=${current.heardFrom.toFixed(2)}`,{method:'POST',headers:{'Content-Type':audio.type},body:audio});
+        if(reply.status===404)return;
+        if(!reply.ok)continue;
+        const {text}=await reply.json() as {text:string};
+        if(take!==current)return;
+        if(shotPhrase?.test(text)){addShot(current,'voice');current.heardFrom=upTo;}
+        else current.heardFrom=Math.max(current.heardFrom,upTo-2.5);
+      }catch{/* the server busy or restarting: listen again next time */}
+    }
+  }
 
   function capture(reply?:OpenQuestion):Promise<Snapshot>{
     // The host's context is read at the same moment as the view, so both describe one instant.
@@ -192,10 +242,11 @@ export function createFeedbackClient(options:ClientOptions){
       let media:MediaStream;
       try{stream??=microphone();media=await stream;}
       catch{stream=undefined;show('The microphone is not available',3);options.sound?.('error');return;}
-      const current:Take={held,reply,snap,recorder:recorder(media),chunks:[],started:now(),timers:[]};
+      const current:Take={held,reply,snap,shots:[],heardFrom:0,recorder:recorder(media),chunks:[],started:now(),timers:[]};
       current.recorder.ondataavailable=event=>{if(event.data.size)current.chunks.push(event.data);};
       current.recorder.start(500);
       take=current;
+      if(canListen&&shotPhrase)void listen(current);
       if(!held)current.timers.push(setTimeout(()=>{
         if(take!==current||current.snap)return;
         current.snap=capture(reply);current.snap.catch(()=>{});
@@ -212,31 +263,37 @@ export function createFeedbackClient(options:ClientOptions){
     const current=take;if(!current)return;
     take=undefined;current.timers.forEach(clearTimeout);options.changed?.(false);
     const snap=current.snap??capture(current.reply);
+    const extras=Promise.all(current.shots.map(shot=>shot.snap.then(s=>({image:s.image,seconds:shot.seconds,trigger:shot.trigger,head:s.details?.head}) as ExtraView,()=>null)))
+      .then(list=>list.filter((v):v is ExtraView=>!!v));
     const seconds=(now()-current.started)/1000;
     current.recorder.onstop=()=>{
       if(seconds<timing.shortest){show('Too short, not saved',2);return;}
       const voice=new Blob(current.chunks,{type:current.recorder.mimeType||'audio/webm'});
-      void snap.then(shot=>send(shot,voice,seconds,current.reply),error=>{console.error('Feedback snapshot failed:',error);show('Feedback could not be saved',4);});
+      void Promise.all([snap,extras]).then(([shot,more])=>send(shot,voice,seconds,current.reply,more),error=>{console.error('Feedback snapshot failed:',error);show('Feedback could not be saved',4);});
     };
     current.recorder.stop();
   }
 
   /** Uploads one take (view first, then voice) and returns its id and transcript. */
-  async function submit(shot:Snapshot,voice:Blob,seconds?:number){
+  async function submit(shot:Snapshot,voice:Blob,seconds?:number,extras:ExtraView[]=[]){
     const context={...shot.details,...(seconds===undefined?{}:{seconds:+seconds.toFixed(1)})};
     const saved=await http(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:shot.image,context})});
     if(!saved.ok)throw new Error(`view upload answered ${saved.status}: ${await saved.text()}`);
     const {id}=await saved.json() as {id:string};
+    for(const extra of extras){
+      const more=await http(`${base}/${encodeURIComponent(id)}/view`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)});
+      if(!more.ok)console.warn(`Feedback: an extra view was refused (${more.status})`);
+    }
     const heard=await http(`${base}/${encodeURIComponent(id)}/voice`,{method:'POST',headers:{'Content-Type':voice.type||'audio/webm'},body:voice});
     if(!heard.ok)throw new Error(`voice upload answered ${heard.status}: ${await heard.text()}`);
     const {transcript,error}=await heard.json() as {transcript:string|null;error?:string};
     return {id,transcript,error};
   }
 
-  async function send(shot:Snapshot,voice:Blob,seconds:number,reply?:OpenQuestion){
+  async function send(shot:Snapshot,voice:Blob,seconds:number,reply?:OpenQuestion,extras:ExtraView[]=[]){
     show(reply?'Sending your answer…':'Saving feedback…');
     try{
-      const {id,transcript,error}=await submit(shot,voice,seconds);
+      const {id,transcript,error}=await submit(shot,voice,seconds,extras);
       options.sound?.('saved');
       if(reply){
         // One answer per question; the agent goes on with the asking take, which is still followed.
@@ -292,6 +349,8 @@ export function createFeedbackClient(options:ClientOptions){
     /** A menu button: starts (view taken `lookUp` seconds later) or stops. A held take also stops. */
     toggle(){if(take)stop();else void start(false);},
     /** Same as the hold button, except that it also stops a toggled take (as B/Y do on Quest). */
+    /** Takes another view now, while recording (the screenshot button). Returns whether it did. */
+    shot:()=>!!take&&addShot(take,'button'),
     holdDown(){if(take&&!take.held)stop();else void start(true);},
     get recording(){return !!take||starting;},
     /** The agent's open question, if any: the next take will be recorded as its answer. */
@@ -311,10 +370,18 @@ export function createFeedbackClient(options:ClientOptions){
 }
 export type FeedbackClient=ReturnType<typeof createFeedbackClient>;
 
-/** Hold a key (F by default) to talk. Ignored while typing in a text field. Returns a function that unbinds. */
-export function bindKey(client:Pick<FeedbackClient,'holdDown'|'release'>,{key='f',target=window as Pick<Window,'addEventListener'|'removeEventListener'>}={}){
+/**
+ * Hold a key (F by default) to talk, and press another (P) for another screenshot while talking.
+ * Ignored while typing in a text field. Returns a function that unbinds.
+ */
+export function bindKey(client:Pick<FeedbackClient,'holdDown'|'release'|'shot'|'recording'>,{key='f',shotKey='p' as string|null,target=window as Pick<Window,'addEventListener'|'removeEventListener'>}={}){
   const typing=()=>{const el=typeof document==='undefined'?null:document.activeElement;return !!el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||(el as HTMLElement).isContentEditable);};
-  const down=(event:KeyboardEvent)=>{if(event.key.toLowerCase()===key&&!event.repeat&&!typing())client.holdDown();};
+  const down=(event:KeyboardEvent)=>{
+    if(event.repeat||typing())return;
+    const pressed=event.key.toLowerCase();
+    if(pressed===key)client.holdDown();
+    else if(shotKey&&pressed===shotKey&&client.recording)client.shot();
+  };
   const up=(event:KeyboardEvent)=>{if(event.key.toLowerCase()===key)client.release();};
   target.addEventListener('keydown',down as EventListener);target.addEventListener('keyup',up as EventListener);
   return ()=>{target.removeEventListener('keydown',down as EventListener);target.removeEventListener('keyup',up as EventListener);};

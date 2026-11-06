@@ -35,6 +35,12 @@ export function eyeView(renderer:WebGLRenderer,scene:Scene,camera:PerspectiveCam
     eye.matrixWorld.decompose(lens.position,lens.quaternion,lens.scale);lens.updateMatrixWorld();
     shot=lens;aspect=eye.viewport.z/eye.viewport.w||camera.aspect;
   }
+  // A canvas with no size yet (a hidden tab, a page still laying out) has no aspect, and its camera projects
+  // nothing; shoot through a copy at 16:9 instead.
+  if(!Number.isFinite(aspect)||aspect<=0){
+    aspect=16/9;
+    if(shot===camera){const lens=camera.clone();lens.aspect=aspect;lens.updateProjectionMatrix();lens.updateMatrixWorld();shot=lens;}
+  }
   const height=Math.round(width/aspect),target=new WebGLRenderTarget(width,height,{samples:4});
   const previousBackground=scene.background,previousTarget=renderer.getRenderTarget(),wasXR=xr.enabled,shown=hidden.map(o=>o.visible);
   xr.enabled=false;if(replace!==undefined)scene.background=room;for(const o of hidden)o.visible=false;
@@ -108,6 +114,8 @@ export function createStatusLabel({paper='#fffaf0',ink='#1b1b1b',font='system-ui
 export type XRButton={hand:'left'|'right';button:number};
 /** B on the right controller and Y on the left. */
 export const HOLD_BUTTONS:XRButton[]=[{hand:'right',button:5},{hand:'left',button:5}];
+/** A on the right controller and X on the left: another screenshot, only while recording. */
+export const SHOT_BUTTONS:XRButton[]=[{hand:'right',button:4},{hand:'left',button:4}];
 
 /** Turns the XR session's gamepad states into press and release edges. Call `poll()` once per frame. */
 export function xrButtons(renderer:WebGLRenderer,buttons:XRButton[]=HOLD_BUTTONS){
@@ -131,6 +139,10 @@ export interface ThreeFeedbackOptions extends Omit<ClientOptions,'snapshot'|'sho
   holdButtons?:XRButton[];
   /** Hold-to-talk keyboard key on desktop; null for none. Default F. */
   key?:string|null;
+  /** Buttons that take another screenshot while recording; [] for none. Default A and X. */
+  shotButtons?:XRButton[];
+  /** Keyboard key for another screenshot while recording; null for none. Default P. */
+  shotKey?:string|null;
   label?:LabelStyle;
   view?:Omit<EyeViewOptions,'hidden'>;
   /** Also called with every message, e.g. to show it in the page outside XR. */
@@ -154,8 +166,8 @@ export function attachFeedback(options:ThreeFeedbackOptions){
     snapshot,
     show(text,seconds){label.show(text,seconds);options.onMessage?.(text,seconds);},
   });
-  const buttons=xrButtons(renderer,options.holdButtons);
-  const unbindKey=options.key===null||typeof window==='undefined'?()=>{}:bindKey(client,{key:options.key??'f'});
+  const buttons=xrButtons(renderer,options.holdButtons),shotButtons=xrButtons(renderer,options.shotButtons??SHOT_BUTTONS);
+  const unbindKey=options.key===null||typeof window==='undefined'?()=>{}:bindKey(client,{key:options.key??'f',shotKey:options.shotKey===undefined?'p':options.shotKey});
   return {
     client,
     label,
@@ -167,6 +179,7 @@ export function attachFeedback(options:ThreeFeedbackOptions){
       const edge=buttons.poll();
       if(edge.down)client.holdDown();
       if(edge.up)client.release();
+      if(shotButtons.poll().down&&client.recording)client.shot();
       label.update(delta,headCamera(renderer,camera));
     },
     dispose(){unbindKey();client.dispose();label.dispose();},

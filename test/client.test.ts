@@ -252,3 +252,64 @@ test('speech can be turned off, or replaced with your own speaker',async()=>{
   assert.equal(spoken('Skipped:   not   a bug'),'Skipped. not a bug');
   assert.equal(spoken('Fine'),'Fine');
 });
+
+class StreamingRecorder extends FakeRecorder{
+  private timer?:ReturnType<typeof setInterval>;
+  start(){super.start();this.timer=setInterval(()=>this.ondataavailable?.({data:new Blob(['chunk'],{type:this.mimeType})}),10);}
+  stop(){clearInterval(this.timer);super.stop();}
+}
+
+test('the screenshot button takes more views during a take; they are saved as view-2, view-3 with when and why',async()=>{
+  const t=await loop({transcribe:undefined} as any);
+  try{
+    t.client.press();await until(()=>t.recorders[0]?.started,'recording');
+    assert.equal(t.client.shot(),true);
+    await sleep(20);
+    assert.equal(t.client.shot(),true);
+    assert.equal(t.shown.at(-1),'● Recording… screenshot 3 taken');
+    await sleep(20);t.client.release();
+    await until(()=>t.shown.some(s=>s.startsWith('Saved')),'saved');
+    const folder=join(t.root,t.takes()[0]);
+    assert.deepEqual(readdirSync(folder).sort(),['context.json','transcript.txt','view-2.png','view-3.png','view.png','views.json','voice.webm']);
+    const views=JSON.parse(readFileSync(join(folder,'views.json'),'utf8'));
+    assert.deepEqual(views.map((v:{file:string;trigger:string})=>[v.file,v.trigger]),[['view.png','start'],['view-2.png','button'],['view-3.png','button']]);
+    assert.deepEqual(views[1].head,{position:[0,1.6,0],looking:[0,0,-1]});
+    assert.ok(t.sounds.filter(s=>s==='shot').length===2);
+    assert.equal(t.client.shot(),false,'no screenshot outside a take');
+  }finally{t.close();}
+});
+
+test('saying "take a screenshot" while recording takes one view per phrase, listening only to new audio',async()=>{
+  const froms:number[]=[];let calls=0;
+  const transcriber={name:'fake',transcribe:async()=>'the ball, take a screenshot, is too big',listen:async(_:Buffer,{from}:{from:number})=>{froms.push(from);calls++;return calls===2?'the ball, take a screenshot':'the ball';}};
+  const root=join(mkdtempSync(join(tmpdir(),'jxrvis-client-')),'inbox');
+  const handle=feedbackInbox({root,transcribe:transcriber});
+  const server=createServer((req,res)=>void handle(req,res,()=>{res.writeHead(404);res.end();}));
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  const shown:string[]=[];
+  const client=createFeedbackClient({
+    base:`http://127.0.0.1:${(server.address() as {port:number}).port}/api/feedback`,
+    snapshot:()=>IMAGE,show:text=>shown.push(text),captureErrors:false,voice:'off',
+    microphone:async()=>({getTracks:()=>[]}) as unknown as MediaStream,
+    recorder:()=>new StreamingRecorder(),
+    timing:{shortest:0,listenEvery:.05,followEvery:.05,followFor:.2},
+  });
+  try{
+    client.press();
+    await until(()=>shown.includes('● Recording… screenshot 2 taken'),'voice shot');
+    await until(()=>calls>=5,'more listening');
+    client.release();
+    await until(()=>shown.some(s=>s.startsWith('Saved')),'saved');
+    const [id]=readdirSync(root).filter(n=>n!=='.gitignore');
+    const views=JSON.parse(readFileSync(join(root,id,'views.json'),'utf8'));
+    assert.deepEqual(views.map((v:{trigger:string})=>v.trigger),['start','voice'],'one phrase, one view');
+    assert.equal(froms[0],0);
+    assert.ok(froms[2]>0&&froms[2]>=froms[1],'after a hit it listens only to what comes next');
+  }finally{client.dispose();server.close();}
+});
+
+test('the shot phrase understands the usual ways to ask for a screenshot',async()=>{
+  const {SHOT_PHRASE}=await import('../src/client/core.ts');
+  for(const said of ['Take a screenshot.','take another screenshot','grab a snapshot','Take one more picture','take a screen shot','get a photo'])assert.match(said,SHOT_PHRASE,said);
+  for(const said of ['the screenshot shows','I took a nap','take a seat'])assert.doesNotMatch(said,SHOT_PHRASE,said);
+});

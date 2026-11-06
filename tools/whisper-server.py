@@ -15,10 +15,13 @@ Then point jXRvis at it: transcribe: 'http://127.0.0.1:8788/transcribe' (Vite pl
 
 GET /health answers {"ok": true, "model": ..., "device": ...} once the model is loaded.
 POST /transcribe takes audio in any format ffmpeg reads (webm, ogg, m4a, mp3, wav) and answers {"text": "..."}.
+POST /transcribe?from=12.5 transcribes only from 12.5 s on: the headset sends the recording so far every
+second or two to hear "take a screenshot" while the player talks.
 It uses CUDA when torch sees a GPU, the CPU otherwise (slower: a long take can need minutes).
 """
 import argparse
 import json
+from urllib.parse import parse_qs, urlsplit
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
@@ -46,8 +49,10 @@ model = whisper.load_model(args.model, device=DEVICE, download_root=args.weights
 lock = Lock()
 
 
-def transcribe(data):
-    raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', 'pipe:0', '-f', 'f32le', '-ac', '1', '-ar', str(RATE), 'pipe:1'],
+def transcribe(data, start=0.0):
+    # -ss after -i: decode from the beginning and drop the audio before `start` (exact, and cheap for speech).
+    seek = ['-ss', f'{start:.2f}'] if start > 0 else []
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', 'pipe:0', *seek, '-f', 'f32le', '-ac', '1', '-ar', str(RATE), 'pipe:1'],
                          input=data, capture_output=True, check=True).stdout
     audio = np.frombuffer(raw, np.float32).copy()
     if audio.size == 0:
@@ -72,13 +77,15 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(404, {'error': 'not found'})
 
     def do_POST(self):
-        if self.path.rstrip('/') != '/transcribe':
+        url = urlsplit(self.path)
+        if url.path.rstrip('/') != '/transcribe':
             return self.reply(404, {'error': 'POST /transcribe'})
         try:
             length = int(self.headers['content-length'])
             if length > MAX_BYTES:
                 return self.reply(413, {'error': 'too large'})
-            self.reply(200, {'text': transcribe(self.rfile.read(length))})
+            start = max(0.0, float(parse_qs(url.query).get('from', ['0'])[0]))
+            self.reply(200, {'text': transcribe(self.rfile.read(length), start)})
         except subprocess.CalledProcessError as error:
             self.reply(400, {'error': 'ffmpeg could not read the audio: ' + error.stderr.decode(errors='replace')[:160]})
         except (KeyError, TypeError, ValueError) as error:

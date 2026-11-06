@@ -8,6 +8,7 @@ description: Handle feedback a player speaks in a VR/MR headset (jXRvis). Use wh
 The player tests this app in a VR/MR headset and speaks feedback while playing. Each take is a folder `feedback/inbox/<id>/` on this PC:
 
 - `view.png`: what the player saw as they started talking (the status label and menu are left out; in passthrough the room is grey).
+- `view-2.png`, `view-3.png`, …: more views the player took while talking, by saying "take a screenshot" or with a button. `views.json` says when (seconds into the recording) and why; match them to the transcript ("this one… take a screenshot… and here…").
 - `voice.*`: the recording. `transcript.txt`: its transcript, when a transcriber runs; it can be missing or misheard.
 - `context.json`: what the app was doing (`summary`, `app`), head position and direction, the page, the last console errors, the take's length.
 - `status.txt`: yours to write. Each line you add shows in the player's view as "Agent: <line>", and `Question`, `Done` and `Skipped` lines are also read aloud to them.

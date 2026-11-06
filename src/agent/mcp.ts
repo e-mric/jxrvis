@@ -19,8 +19,12 @@ const summary=(take:Take)=>({
   ...(take.replyTo?{replyTo:take.replyTo,question:take.question}:{}),
   folder:take.folder,
   view:take.view,
+  views:take.views.map(({file,path,seconds,trigger})=>({file,path,seconds,trigger})),
   voice:take.voice,
 });
+
+/** Most images one tool result carries; the rest are listed by path. */
+const MAX_IMAGES=6;
 
 function content(take:Take,includeView:boolean,root:string){
   const asking=take.replyTo?readTake(root,take.replyTo):null;
@@ -31,8 +35,16 @@ function content(take:Take,includeView:boolean,root:string){
   const parts:({type:'text';text:string}|{type:'image';data:string;mimeType:string})[]=[
     {type:'text',text:JSON.stringify({...summary(take),...reply,statusLines:take.statusLines,context:take.context},null,2)},
   ];
-  if(includeView&&take.view){
-    try{parts.push({type:'image',data:readFileSync(take.view).toString('base64'),mimeType:take.view.endsWith('.png')?'image/png':'image/jpeg'});}catch{}
+  if(includeView){
+    // Every view the player took, each introduced by when and why, so they can be matched to the transcript.
+    const many=take.views.length>1;
+    for(const view of take.views.slice(0,MAX_IMAGES)){
+      try{
+        const data=readFileSync(view.path).toString('base64');
+        if(many)parts.push({type:'text',text:`${view.file}: ${view.trigger==='start'?'as the take started':`${view.trigger==='voice'?'asked for by voice':'button'}${view.seconds===null?'':` at ${view.seconds} s`}`}`});
+        parts.push({type:'image',data,mimeType:view.file.endsWith('.png')?'image/png':'image/jpeg'});
+      }catch{}
+    }
   }
   return parts;
 }

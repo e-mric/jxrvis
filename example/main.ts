@@ -27,15 +27,22 @@ const message=document.getElementById('message')!,toggle=document.getElementById
 const synthetic=document.getElementById('synthetic') as HTMLInputElement;
 if(new URLSearchParams(location.search).has('synthetic'))synthetic.checked=true;
 
-// No microphone (a desktop without one, a test browser): record a tone instead, through the same MediaRecorder path.
-let tone:MediaStream|undefined;
+// No microphone (a desktop without one, a test browser): record a tone instead, through the same MediaRecorder
+// path. With ?voiceFile=<url> (a recording of someone talking), each take plays that file instead, so the whole
+// loop, transcript and "take a screenshot" included, can be tried without speaking.
+const voiceFile=new URLSearchParams(location.search).get('voiceFile');
+let audio:AudioContext|undefined,out:MediaStreamAudioDestinationNode|undefined,speech:Promise<AudioBuffer>|undefined;
 function syntheticVoice(){
-  if(!tone){
-    const audio=new AudioContext(),osc=audio.createOscillator(),gain=audio.createGain(),out=audio.createMediaStreamDestination();
-    osc.frequency.value=220;gain.gain.value=.2;osc.connect(gain).connect(out);osc.start();void audio.resume();
-    tone=out.stream;
+  if(!audio){
+    audio=new AudioContext();out=audio.createMediaStreamDestination();
+    if(voiceFile)speech=fetch(voiceFile).then(r=>r.arrayBuffer()).then(data=>audio!.decodeAudioData(data));
+    else{const osc=audio.createOscillator(),gain=audio.createGain();osc.frequency.value=220;gain.gain.value=.2;osc.connect(gain).connect(out);osc.start();}
+    void audio.resume();
   }
-  return Promise.resolve(tone);
+  return Promise.resolve(out!.stream);
+}
+function playVoiceFile(){
+  void speech?.then(buffer=>{const source=audio!.createBufferSource();source.buffer=buffer;source.connect(out!);source.start();});
 }
 
 const feedback=attachFeedback({
@@ -44,7 +51,10 @@ const feedback=attachFeedback({
   // What the app was doing; `summary` is printed next to the transcript by the watcher.
   context:()=>({summary:`knot ${knot.visible?'spinning':'hidden'}; ${renderer.xr.isPresenting?'in XR':'desktop'}`,shapes:{knot:knot.position.toArray(),box:box.position.toArray(),ball:ball.position.toArray()}}),
   microphone:()=>synthetic.checked?syntheticVoice():navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}),
-  changed:recording=>{toggle.textContent=recording?'Stop':'Record';toggle.setAttribute('aria-pressed',String(recording));},
+  changed:recording=>{
+    toggle.textContent=recording?'Stop':'Record';toggle.setAttribute('aria-pressed',String(recording));
+    if(recording&&synthetic.checked)playVoiceFile();
+  },
   onMessage:text=>{message.textContent=text;},
 });
 toggle.addEventListener('click',()=>feedback.toggle());

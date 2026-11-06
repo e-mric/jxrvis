@@ -2,7 +2,7 @@ import {existsSync,mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import type {IncomingMessage} from 'node:http';
 import type {Http2ServerRequest} from 'node:http2';
 import {join} from 'node:path';
-import {DEFAULT_BASE,FILES,VOICE_TYPES,currentStatus,isId,stamp} from '../spec.ts';
+import {DEFAULT_BASE,FILES,VIEW_EXTENSIONS,VOICE_EXTENSIONS,VOICE_TYPES,currentStatus,isId,stamp} from '../spec.ts';
 import {resolveSpeech,type SpeechOption} from './speech.ts';
 import {resolveTranscriber,type TranscriberOption} from './transcribers.ts';
 
@@ -67,7 +67,17 @@ export function feedbackInbox({root,transcribe,speech:speechOption,base=DEFAULT_
     }
     const rest=path.slice(prefix.length);
     try{
-      if(req.method==='GET'&&rest==='/health')return reply(200,{ok:true,transcriber:transcriber.name,speech:speech?.name??'none'});
+      if(req.method==='GET'&&rest==='/health')return reply(200,{ok:true,transcriber:transcriber.name,speech:speech?.name??'none',listen:!!transcriber.listen});
+      if(req.method==='POST'&&rest==='/listen'){
+        // While the player talks: what they said since `from`, so the headset can hear "take a screenshot".
+        if(!transcriber.listen)return reply(404,{error:'This transcriber cannot listen'});
+        const type=String(req.headers['content-type']??'').split(';')[0].trim().toLowerCase();
+        if(!VOICE_TYPES[type])return reply(400,{error:'Unsupported audio type'});
+        const from=Math.max(0,Number(new URL(req.url??'/','http://localhost').searchParams.get('from'))||0);
+        const audio=await body(req,maxVoiceBytes);
+        try{return reply(200,{text:(await transcriber.listen(audio,{type,from})).trim()});}
+        catch(error){return reply(502,{error:String((error as Error)?.message??error).slice(0,200)});}
+      }
       if(req.method==='POST'&&rest==='/speech'){
         if(!speech)return reply(404,{error:'No speech engine on this server'});
         let text:unknown;
@@ -96,7 +106,7 @@ export function feedbackInbox({root,transcribe,speech:speechOption,base=DEFAULT_
         writeFileSync(join(folder,FILES.context),JSON.stringify({savedAt:at.toISOString(),transcriber:transcriber.name,...(context as object|undefined)},null,2)+'\n');
         return reply(200,{id});
       }
-      const route=rest.match(/^\/([^/]+)\/(voice|status)$/);
+      const route=rest.match(/^\/([^/]+)\/(voice|status|view)$/);
       if(!route)return reply(404,{error:'Not found'});
       let id:string;try{id=decodeURIComponent(route[1]);}catch{return reply(404,{error:'No such take'});}
       const folder=join(root,id);
@@ -104,6 +114,27 @@ export function feedbackInbox({root,transcribe,speech:speechOption,base=DEFAULT_
       if(req.method==='GET'&&route[2]==='status'){
         const file=join(folder,FILES.status);
         return reply(200,{status:existsSync(file)?currentStatus(readFileSync(file,'utf8')):null});
+      }
+      if(req.method==='POST'&&route[2]==='view'){
+        if(VOICE_EXTENSIONS.some(ext=>existsSync(join(folder,`voice.${ext}`))))return reply(409,{error:'The take is finished'});
+        let parsed:{image?:unknown;seconds?:unknown;trigger?:unknown;head?:unknown};
+        const raw=await body(req,maxViewBytes);
+        try{parsed=JSON.parse(raw.toString());}catch{return reply(400,{error:'The body must be JSON'});}
+        const {image,seconds,trigger,head}=parsed??{};
+        if(typeof image!=='string'||!IMAGE.test(image))return reply(400,{error:'The view must be a PNG or JPEG data URL'});
+        const ext=image.startsWith('data:image/png')?'png':'jpg';
+        let n=2;while(VIEW_EXTENSIONS.some(e=>existsSync(join(folder,`view-${n}.${e}`))))n++;
+        const file=`view-${n}.${ext}`;
+        writeFileSync(join(folder,file),Buffer.from(image.replace(IMAGE,''),'base64'));
+        const list=join(folder,FILES.views);
+        let views:Record<string,unknown>[]=[];
+        try{views=JSON.parse(readFileSync(list,'utf8'));}catch{
+          const first=VIEW_EXTENSIONS.map(e=>`view.${e}`).find(f=>existsSync(join(folder,f)));
+          if(first)views=[{file:first,seconds:0,trigger:'start'}];
+        }
+        views.push({file,...(typeof seconds==='number'&&Number.isFinite(seconds)?{seconds:+seconds.toFixed(1)}:{}),trigger:trigger==='voice'||trigger==='button'?trigger:'button',...(head&&typeof head==='object'?{head}:{})});
+        writeFileSync(list,JSON.stringify(views,null,2)+'\n');
+        return reply(200,{id,file});
       }
       if(req.method==='POST'&&route[2]==='voice'){
         const type=String(req.headers['content-type']??'').split(';')[0].trim().toLowerCase();

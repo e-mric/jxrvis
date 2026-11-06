@@ -20,6 +20,8 @@ feedback/inbox/
   .gitignore                    "*": written by the server so takes are never committed
   2026-11-03_18-42-07/
     view.png                    the player's eye view as the take started (or view.jpg)
+    view-2.png, view-3.png …    more views taken during the take ("take a screenshot", or a button)
+    views.json                  when and why each extra view was taken; only with extra views
     context.json                what the app was doing; see below
     voice.webm                  the recording (or .ogg .m4a .mp3 .wav)
     transcript.txt              the transcript; absent when there is no transcriber or it failed
@@ -39,6 +41,8 @@ Regex: `^\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d(-\d+)?$`. Ids sort in time order as stri
 | File | Written by | When | Content |
 | --- | --- | --- | --- |
 | `view.png` / `view.jpg` | server | first request of the take | The decoded image. The client chooses the moment: as a held button goes down, or a little after a menu tap so the player can look back at the scene. UI that belongs to the loop itself (the status label, the menu that started the take) should be left out. |
+| `view-<n>.png` / `.jpg` | server | after the first view, before the voice | Extra views the player asked for during the take, numbered from 2 in the order they were taken. Same rules as the first view. |
+| `views.json` | server | with each extra view | A JSON array, one entry per view including the first: `{"file":"view-2.png","seconds":4.2,"trigger":"voice"}`. `seconds` is the time since the recording started; `trigger` is `"start"` (the first view), `"voice"` (the player said "take a screenshot") or `"button"`. Entries may carry `head` like the context. |
 | `context.json` | server | with the view | A JSON object, pretty-printed, newline at the end. |
 | `voice.<ext>` | server | second request | The audio exactly as uploaded. `ext` comes from the Content-Type: `audio/webm` → `webm`, `audio/ogg` → `ogg`, `audio/mp4` → `m4a`, `audio/mpeg` → `mp3`, `audio/wav` or `audio/x-wav` → `wav`. Kept even when transcription fails. |
 | `transcript.txt` | server (transcriber) | after the voice | Plain UTF-8 text, one trailing newline. Present only when a transcriber produced text. An empty transcript is written as an empty line. |
@@ -108,8 +112,10 @@ Served by the dev server the headset page comes from (same origin), under a base
 
 | Method and path | Request | Reply |
 | --- | --- | --- |
-| `GET {base}/health` | — | `200 {"ok":true,"transcriber":"none"\|"<name>","speech":"none"\|"<name>"}` |
+| `GET {base}/health` | — | `200 {"ok":true,"transcriber":"none"\|"<name>","speech":"none"\|"<name>","listen":true\|false}` |
 | `POST {base}` | `Content-Type: application/json`, body `{"image":"data:image/png;base64,…","context":{…}}`. `image` must be a PNG or JPEG data URL. Up to 16 MB. | `200 {"id":"…"}`. The take folder now holds the view and context. |
+| `POST {base}/{id}/view` | `Content-Type: application/json`, body `{"image":"data:image/png;base64,…","seconds":4.2,"trigger":"voice"\|"button","head":{…}}`. Only before the voice arrives. | `200 {"id":"…","file":"view-2.png"}`. `409` once the take has its voice. |
+| `POST {base}/listen?from=<s>` | Optional. The recording so far, raw audio as for the voice. `from`: seconds into it where to start listening (default 0). | `200 {"text":"…"}`: the transcript of the audio from `from` to the end. Clients poll it during a recording to hear spoken commands ("take a screenshot") while the player talks. `404` when the transcriber cannot listen (`"listen":false` in health). Nothing is stored. |
 | `POST {base}/{id}/voice` | Body is the raw audio, `Content-Type` one of the audio types above (parameters such as `;codecs=opus` are allowed). Up to 30 MB. | `200 {"id":"…","transcript":"…"}`, or `200 {"id":"…","transcript":null}` with no transcriber, or `200 {"id":"…","transcript":null,"error":"…"}` when transcription failed (the voice is kept). |
 | `GET {base}/{id}/status` | — | `200 {"status":"On it: …"}` (the current status) or `200 {"status":null}` before the agent writes one. |
 | `POST {base}/speech` | Optional. `Content-Type: application/json`, body `{"text":"…"}`, up to 1000 characters. | `200` with the text spoken as audio (`audio/wav`, `audio/mpeg`, `audio/ogg` or `audio/webm`), for clients that cannot synthesise speech themselves. `404` when the server has no speech engine (`"speech":"none"` in health). |
@@ -138,3 +144,4 @@ Not part of the wire contract, but every client should behave alike so players c
 - If `GET {base}/health` fails, say that feedback needs the dev server, and do nothing else.
 - **Spoken status**: `Question`, `Done` and `Skipped` lines are also read aloud (the player's eyes are busy), with the prefix spoken as a word ("Done. Ball moved down…"); `On it` gets a short sound only. A question ends with a hint on how to answer ("Hold the talk button to answer."). Clients use the server's `POST {base}/speech` when health reports a speech engine, else the platform's own text-to-speech, else stay silent. Players can turn speech off.
 - **Replies**: while a followed take's current status is a `Question`, the next take is recorded as a reply (`replyTo` and `question` in its context, label "Answering…"). It is not followed itself; the client keeps following the asking take.
+- **More views**: during a recording, the player can take more views. A button (Quest: A or X while recording; desktop: P) takes one at once. Saying "take a screenshot" takes one when the server can listen: the client sends the recording so far to `POST {base}/listen` about every 1.5 s, from just before where it last listened, and takes a view when the phrase shows up in the text. That view comes about a second after the words, so the player keeps looking. The label confirms each one ("Screenshot 2"). Extra views are uploaded after the first view and before the voice.

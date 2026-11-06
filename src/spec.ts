@@ -6,7 +6,7 @@ export const ID=/^\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d(-\d+)?$/;
 export const DEFAULT_BASE='/api/feedback';
 export const DEFAULT_INBOX='feedback/inbox';
 
-export const FILES={context:'context.json',transcript:'transcript.txt',status:'status.txt'} as const;
+export const FILES={context:'context.json',transcript:'transcript.txt',status:'status.txt',views:'views.json'} as const;
 /** Audio Content-Types the inbox accepts, and the extension each is saved with. */
 export const VOICE_TYPES:Record<string,string>={'audio/webm':'webm','audio/ogg':'ogg','audio/mp4':'m4a','audio/mpeg':'mp3','audio/wav':'wav','audio/x-wav':'wav'};
 export const VOICE_EXTENSIONS=[...new Set(Object.values(VOICE_TYPES))];

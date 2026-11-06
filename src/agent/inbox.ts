@@ -20,10 +20,27 @@ export interface Take{
   /** When this take answers an agent's question: the asking take's id, and the question. */
   replyTo:string|null;
   question:string|null;
+  /** Every view, the first one included, in the order they were taken. */
+  views:TakeView[];
 }
+
+/** One view of a take: its file, when it was taken (seconds into the recording) and why. */
+export interface TakeView{path:string;file:string;seconds:number|null;trigger:'start'|'voice'|'button'|null}
 
 const read=(file:string)=>{try{return readFileSync(file,'utf8');}catch{return null;}};
 const first=(folder:string,name:string,extensions:string[])=>extensions.map(ext=>join(folder,`${name}.${ext}`)).find(existsSync)??null;
+const VIEW_FILE=/^view(?:-(\d+))?\.(png|jpg)$/;
+
+function views(folder:string):TakeView[]{
+  let meta:{file?:unknown;seconds?:unknown;trigger?:unknown}[]=[];
+  try{const list=JSON.parse(read(join(folder,FILES.views))??'[]');if(Array.isArray(list))meta=list;}catch{}
+  const files=readdirSync(folder).filter(f=>VIEW_FILE.test(f)).sort((a,b)=>Number(a.match(VIEW_FILE)![1]??1)-Number(b.match(VIEW_FILE)![1]??1));
+  return files.map(file=>{
+    const about=meta.find(m=>m?.file===file);
+    const trigger=about?.trigger==='start'||about?.trigger==='voice'||about?.trigger==='button'?about.trigger:file.startsWith('view.')?'start':null;
+    return {path:join(folder,file),file,seconds:typeof about?.seconds==='number'?about.seconds:file.startsWith('view.')?0:null,trigger};
+  });
+}
 
 /** Take ids in the inbox, oldest first. Anything that is not a take folder is ignored. */
 export function takeIds(root:string){
@@ -51,6 +68,7 @@ export function readTake(root:string,id:string):Take|null{
     finished:isFinal(status),
     replyTo:typeof context?.replyTo==='string'&&isId(context.replyTo)?context.replyTo:null,
     question:typeof context?.question==='string'?context.question:null,
+    views:views(folder),
   };
 }
 
@@ -130,7 +148,8 @@ export class TakeTracker{
 export function describe(take:Take){
   const said=(take.transcript!==null?(take.transcript||'(silence)')
     :take.voice?`(no transcript: listen to ${take.voice})`:'(no voice: view and context only)').replace(/\s+/g,' ');
+  const more=take.views.length>1?` (+${take.views.length-1} screenshot${take.views.length>2?'s':''})`:'';
   // An answer to the agent's question: carry on with the asking take, which the headset follows.
-  if(take.replyTo)return `ANSWER ${take.id} to ${take.replyTo}${take.question?` [${take.question}]`:''}: ${said}`;
-  return `FEEDBACK ${take.id}${take.summary?` [${take.summary}]`:''}: ${said}`;
+  if(take.replyTo)return `ANSWER ${take.id} to ${take.replyTo}${take.question?` [${take.question}]`:''}${more}: ${said}`;
+  return `FEEDBACK ${take.id}${take.summary?` [${take.summary}]`:''}${more}: ${said}`;
 }

@@ -162,3 +162,27 @@ test('over MCP, an answer comes with the asking take and what to do next',async(
     assert.match(info.next,/set_status on 2026-11-03_18-42-07/);
   }finally{await client.close();}
 });
+
+test('a take with screenshots lists every view in order, with when and why, for the watcher and over MCP',async()=>{
+  const root=inbox();
+  take(root,'2026-11-03_18-00-00',{transcript:'earlier'});
+  const transport=new StdioClientTransport({command:process.execPath,args:['--experimental-strip-types','--no-warnings',bin('mcp'),'--inbox',root],stderr:'pipe'});
+  const client=new Client({name:'test',version:'1'});
+  await client.connect(transport);
+  try{
+    const next=client.callTool({name:'next_feedback',arguments:{timeout_seconds:10}});
+    await sleep(200);
+    const folder=join(root,'2026-11-03_18-42-07');mkdirSync(folder);
+    for(const file of ['view.png','view-2.png','view-10.png','view-3.png'])writeFileSync(join(folder,file),PNG);
+    writeFileSync(join(folder,'views.json'),JSON.stringify([{file:'view.png',seconds:0,trigger:'start'},{file:'view-2.png',seconds:4.2,trigger:'voice'},{file:'view-3.png',seconds:6,trigger:'button'}]));
+    writeFileSync(join(folder,'context.json'),'{"transcriber":"whisper"}');writeFileSync(join(folder,'voice.webm'),'x');
+    writeFileSync(join(folder,'transcript.txt'),'here, take a screenshot, and this\n');
+    const t=readTake(root,'2026-11-03_18-42-07')!;
+    assert.deepEqual(t.views.map(v=>[v.file,v.seconds,v.trigger]),[['view.png',0,'start'],['view-2.png',4.2,'voice'],['view-3.png',6,'button'],['view-10.png',null,null]]);
+    assert.equal(describe(t),'FEEDBACK 2026-11-03_18-42-07 (+3 screenshots): here, take a screenshot, and this');
+    const got=await next as {content:{type:string;text?:string}[]};
+    assert.deepEqual(got.content.map(c=>c.type),['text','text','image','text','image','text','image','text','image']);
+    assert.equal(got.content[3].text,'view-2.png: asked for by voice at 4.2 s');
+    assert.equal(JSON.parse(got.content[0].text!).views.length,4);
+  }finally{await client.close();}
+});

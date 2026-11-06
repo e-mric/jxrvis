@@ -50,7 +50,7 @@ test('a take keeps what the player saw, what they said and its transcript in one
 test('with no transcriber a take keeps its voice and gets no transcript',async()=>{
   const {root,base,close}=await inbox({transcribe:'none'});
   try{
-    assert.deepEqual(await fetch(`${base}/api/feedback/health`).then(r=>r.json()),{ok:true,transcriber:'none',speech:'none'});
+    assert.deepEqual(await fetch(`${base}/api/feedback/health`).then(r=>r.json()),{ok:true,transcriber:'none',speech:'none',listen:false});
     const {id}=await view(base).then(r=>r.json()) as {id:string};
     assert.deepEqual(await (await voice(base,id,'audio/ogg')).json(),{id,transcript:null});
     assert.deepEqual(readdirSync(join(root,id)).sort(),['context.json','view.png','voice.ogg']);
@@ -252,5 +252,58 @@ test('an HTTP speech server gets the text as JSON and must answer audio',async()
     const {audio,type}=await httpSpeech(`${url}/tts`).speak('hola');
     assert.equal(type,'audio/mpeg');assert.equal(Buffer.from(audio).toString(),'mp3');assert.deepEqual(JSON.parse(got),{text:'hola'});
     await assert.rejects(httpSpeech(`${url}/html`).speak('x'),/not audio/);
+  }finally{fake.close();}
+});
+
+test('extra views taken during a take are numbered, listed with when and why, and refused once the voice is in',async()=>{
+  const {root,base,close}=await inbox({transcribe:'none'});
+  const extra=(id:string,body:unknown)=>fetch(`${base}/api/feedback/${id}/view`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  try{
+    const {id}=await view(base).then(r=>r.json()) as {id:string};
+    assert.deepEqual(await (await extra(id,{image:IMAGE,seconds:4.24,trigger:'voice',head:{position:[0,1.6,0]}})).json(),{id,file:'view-2.png'});
+    assert.deepEqual(await (await extra(id,{image:IMAGE,seconds:7,trigger:'nonsense'})).json(),{id,file:'view-3.png'});
+    assert.equal((await extra(id,{image:'data:text/plain;base64,eA=='})).status,400);
+    assert.equal((await extra('2026-11-03_18-42-09',{image:IMAGE})).status,404);
+    assert.deepEqual(JSON.parse(readFileSync(join(root,id,'views.json'),'utf8')),[
+      {file:'view.png',seconds:0,trigger:'start'},
+      {file:'view-2.png',seconds:4.2,trigger:'voice',head:{position:[0,1.6,0]}},
+      {file:'view-3.png',seconds:7,trigger:'button'},
+    ]);
+    await voice(base,id);
+    assert.equal((await extra(id,{image:IMAGE})).status,409,'a finished take takes no more views');
+  }finally{close();}
+});
+
+test('the listen route transcribes the recording so far from a given second, when the transcriber can listen',async()=>{
+  const heard:{audio:string;type:string;from:number}[]=[];
+  const transcriber={name:'fake',transcribe:async()=>'x',listen:async(audio:Buffer,info:{type:string;from:number})=>{heard.push({audio:audio.toString(),...info});return ' take a screenshot ';}};
+  const {root,base,close}=await inbox({transcribe:transcriber});
+  const listen=(query:string,type='audio/webm;codecs=opus',b=base)=>fetch(`${b}/api/feedback/listen${query}`,{method:'POST',headers:{'Content-Type':type},body:Buffer.from('so far')});
+  try{
+    assert.equal((await fetch(`${base}/api/feedback/health`).then(r=>r.json()) as {listen:boolean}).listen,true);
+    assert.deepEqual(await (await listen('?from=3.5')).json(),{text:'take a screenshot'});
+    assert.deepEqual(await (await listen('')).json(),{text:'take a screenshot'});
+    assert.deepEqual(heard,[{audio:'so far',type:'audio/webm',from:3.5},{audio:'so far',type:'audio/webm',from:0}]);
+    assert.equal((await listen('','text/plain')).status,400);
+    assert.ok(!existsSync(root),'nothing is stored');
+  }finally{close();}
+  const none=await inbox({transcribe:async()=>'text only'});
+  try{
+    assert.equal((await fetch(`${none.base}/api/feedback/health`).then(r=>r.json()) as {listen:boolean}).listen,false);
+    assert.equal((await listen('','audio/webm',none.base)).status,404);
+  }finally{none.close();}
+});
+
+test('an HTTP transcriber listens by asking its server for the text from a given second',async()=>{
+  const urls:string[]=[];
+  const fake=createServer(async(req,res)=>{for await(const _ of req){}urls.push(req.url!);res.writeHead(200,{'Content-Type':'application/json'});res.end('{"text":"ok"}');});
+  fake.listen(0,'127.0.0.1');await once(fake,'listening');
+  const url=`http://127.0.0.1:${(fake.address() as {port:number}).port}/transcribe`;
+  try{
+    const t=httpTranscriber(url);
+    assert.equal(await t.listen!(Buffer.from('a'),{type:'audio/webm',from:2.345}),'ok');
+    await t.listen!(Buffer.from('a'),{type:'audio/webm',from:0});
+    assert.deepEqual(urls,['/transcribe?from=2.35','/transcribe']);
+    assert.equal(httpTranscriber(url,{listen:false}).listen,undefined);
   }finally{fake.close();}
 });
