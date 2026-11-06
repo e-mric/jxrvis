@@ -233,3 +233,7 @@ npm run verify
 ## Status
 
 Version 0.1, extracted from the live feedback loop of a Quest 3 mixed-reality game, where the same loop is in use. As a package it is verified on desktop: the example page saves takes end to end (view, voice, context, Whisper transcript) and follows status lines. It has not yet been run on a Quest in this packaged form; the XR code paths (eye view of the left eye, B/Y buttons, head-locked label) are ported from the game, where they run on Quest 3.
+
+## License
+
+[MIT](LICENSE)

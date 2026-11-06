@@ -96,5 +96,6 @@
     "three": {
       "optional": true
     }
-  }
+  },
+  "license": "MIT"
 }
