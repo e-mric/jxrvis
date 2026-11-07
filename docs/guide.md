@@ -290,6 +290,8 @@ The agent lists `feedback/inbox/`, reads a take and adds a line to its `status.t
 
 If you do not use a transcriber, jXRvis keeps the voice file. The agent then uses the screenshots and the context. To get transcripts, use the local Whisper server ([tools/whisper-server.py](../tools/whisper-server.py)). It uses CUDA if the PC has an NVIDIA GPU. If not, it uses the CPU. No data goes out of the PC.
 
+The commands below are for a clone of this repository. In your own project, the files are in `node_modules/jxrvis/tools/`, so replace `tools/` with `node_modules/jxrvis/tools/`.
+
 1. Make a Python environment:
 
    ```bash
