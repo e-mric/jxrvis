@@ -1,262 +1,140 @@
 # jXRvis
 
-**Talk to your AI coding agent from inside the headset.**
+**Speak to your AI coding agent from inside the headset.**
 
-You are testing your WebXR app on a Quest. Something looks wrong. Hold **B**, say what it is, let go. jXRvis saves what your eyes saw, what you said and what the app was doing to a folder on your dev PC. Your agent (Claude Code, Codex, Cursor, Aider, a script) picks the take up, fixes the code, and answers in your view and in your ear: *"Done. Ball moved down, reload to see."* When it is not sure, it asks (*"Question. Lock the door or remove it? Hold the talk button to answer."*), and you answer by voice the same way. You never take the headset off.
+jXRvis connects a WebXR headset to an AI coding agent (Claude Code, Codex, Cursor or other agents). You test your app in the headset. When you see a problem, you hold the B button and you speak. The agent receives a screenshot, your words and the app state. The agent changes the code. Then the agent replies in your view and in your ear. You do not remove the headset.
 
-```
- headset (WebXR page)                      dev PC
- ┌──────────────────────┐   view + voice   ┌─────────────────────────────┐
- │ hold B / Y / F, talk │ ───────────────► │ feedback/inbox/<id>/        │
- │                      │                  │   view.png  voice.webm      │  ◄── agent reads,
- │ "Agent: On it: …"    │ ◄─────────────── │   transcript.txt context.json│      fixes code,
- │ "Agent: Done: …"     │   status.txt     │   status.txt                │      writes status
- └──────────────────────┘                  └─────────────────────────────┘
+```mermaid
+flowchart LR
+  H["🥽 Headset<br/>hold B and speak"] -- "screenshot + voice" --> I["📁 feedback/inbox/&lt;id&gt;/<br/>on your PC"]
+  I -- "the agent reads the take" --> A["🤖 AI agent<br/>changes the code"]
+  A -- "the agent writes status.txt" --> I
+  I -- "the headset shows and speaks the reply" --> H
 ```
 
-The core is a **folder and file contract** ([SPEC.md](SPEC.md)), not a framework. Every piece around it is replaceable:
+All data stays on your PC. jXRvis does not use a cloud service. Git does not record the feedback files.
 
-| Piece | In this repo | Swap for |
-| --- | --- | --- |
-| Server | Vite plugin, connect middleware, standalone HTTPS server | anything that implements the four routes in SPEC.md |
-| Transcriber | none (voice only), or the local Whisper server in `tools/` | any `transcribe(audio) → text` function or HTTP endpoint |
-| Headset client | framework-agnostic core + three.js adapter | Babylon.js, A-Frame, IWSDK, or a native Unity/Unreal client following SPEC.md |
-| Agent bridge | `jxrvis-mcp` (MCP over stdio), `jxrvis-watch` (one line per take), or plain files | any agent that can read a folder and write a text file |
+## A conversation
 
-**Privacy:** views and voice stay on your dev PC. Nothing in jXRvis talks to a cloud service; the inbox writes its own `.gitignore` so takes are never committed. (Your agent may of course send what it reads to its model provider, as it does with your code.)
-
-## Try the example
-
-```bash
-git clone https://github.com/e-mric/jxrvis.git
+```mermaid
+sequenceDiagram
+  actor You as You (in the headset)
+  participant PC as jXRvis (dev PC)
+  participant Agent as AI agent
+  You->>PC: Hold B. "The red ball is too high."
+  PC->>Agent: Screenshot, transcript, app state
+  Agent-->>You: "On it: the ball is too high"
+  Agent-->>You: "Question: move it down, or put it on the table?"
+  You->>PC: Hold B. "On the table."
+  PC->>Agent: Your answer
+  Agent->>Agent: Changes the code
+  Agent-->>You: "Done: the ball is on the table, reload to see"
 ```
 
-```bash
-cd jxrvis && npm install && npm run example
+## The contents of a take
+
+A take is one recording. jXRvis keeps each take in a folder:
+
+```
+feedback/inbox/2026-11-07_14-03-22/
+├── view.png         your view when you started to speak
+├── view-2.png …     more screenshots that you asked for
+├── voice.webm       your voice
+├── transcript.txt   your words as text (only with the Whisper server)
+├── context.json     the app state, the head position, the console errors
+└── status.txt       the replies from the agent, one line for each reply
 ```
 
-Open http://localhost:5173, hold **F**, talk, let go. Tick **Synthetic voice** if the PC has no microphone: it records a tone through the same path, or, with `?synthetic&voiceFile=<url>` (a recording of someone talking, served by Vite from `example/`), plays that file into each take, so transcripts and "take a screenshot" can be tried without speaking. The take lands in `example/feedback/inbox/<id>/`. Then, from another terminal:
+## Test the example
 
-```bash
-npx jxrvis-watch --inbox example/feedback/inbox --include-existing --once
-```
+1. Clone the repository:
 
-To answer the take, write a status line into its folder; within 3 seconds the page shows "Agent: …":
+   ```bash
+   git clone https://github.com/e-mric/jxrvis.git
+   ```
 
-```bash
-echo "Done: ball moved down, reload to see" >> example/feedback/inbox/<id>/status.txt
-```
+2. Start the example:
 
-On a Quest: `npm run example:headset` serves HTTPS on your LAN (self-signed; accept the warning once in the Quest browser), then open `https://<your-pc-ip>:5173`, press **Enter VR** and hold **B** or **Y**.
+   ```bash
+   cd jxrvis && npm install && npm run example
+   ```
 
-## Add it to your project
+3. Open http://localhost:5173 in your browser.
+4. Hold the F key and speak.
+5. Release the F key. jXRvis puts the take in `example/feedback/inbox/<id>/`.
+6. Write a reply as the agent. Add a line to the `status.txt` file of the take:
 
-### 1. Install
+   ```bash
+   echo "Done: ball moved down, reload to see" >> example/feedback/inbox/<id>/status.txt
+   ```
 
-Until it is on npm, install from GitHub (the `prepare` script builds it):
+7. Look at the page. The reply shows in 3 seconds or less.
 
-```bash
-npm install --save-dev github:e-mric/jxrvis
-```
+To test on a Quest:
 
-npm builds it while fetching it from git. Recent npm versions may then warn that jxrvis has a `prepare` script "not yet covered by allowScripts"; the package is already built, so the warning can be ignored (or silenced with `npm install-scripts approve jxrvis`).
+1. Type `npm run example:headset`.
+2. On the Quest, open `https://<your-pc-ip>:5173`.
+3. Accept the certificate warning. You do this one time only.
+4. Push **Enter VR**.
+5. Hold the B button and speak.
 
-Or from a local clone, after `npm install` in the clone: `npm install --save-dev ../jxrvis`.
+## Add jXRvis to your project
 
-The three.js adapter expects `three` (r160 or later) in your project; the rest has no 3D dependency.
+1. Install the package:
 
-Add the feedback folder to your `.gitignore` (the inbox ignores itself, but fix notes live next to it):
+   ```bash
+   npm install --save-dev github:e-mric/jxrvis
+   ```
 
-```gitignore
-feedback/
-```
+2. Add the Vite plugin to `vite.config.ts`:
 
-### 2. Server (Vite)
+   ```ts
+   import {jxrvis} from 'jxrvis/vite';
+   export default defineConfig({plugins: [jxrvis()]});
+   ```
 
-```ts
-// vite.config.ts
-import {defineConfig} from 'vite';
-import {jxrvis} from 'jxrvis/vite';
+3. Attach the headset client to your three.js scene:
 
-export default defineConfig({
-  plugins: [jxrvis({
-    inbox: 'feedback/inbox',                          // default
-    transcribe: 'none',                               // or 'http://127.0.0.1:8788/transcribe', or async (audio, {type}) => text
-  })],
-});
-```
+   ```ts
+   import {attachFeedback} from 'jxrvis/three';
 
-The routes join the dev server (and `vite preview`) your page already comes from, so they share its origin and its HTTPS. They are not in production builds.
+   const feedback = attachFeedback({renderer, scene, camera, agentName: 'Claude'});
+   renderer.setAnimationLoop(() => {
+     feedback.update(clock.getDelta());
+     renderer.render(scene, camera);
+   });
+   ```
 
-Other connect-style servers (Express, connect, webpack-dev-server's `setupMiddlewares`, a plain `node:http` server) take the middleware directly:
+4. Connect your agent:
 
-```ts
-import {feedbackInbox} from 'jxrvis/server';
-app.use(feedbackInbox({root: 'feedback/inbox', transcribe: 'none'}));
-```
+   ```bash
+   claude mcp add jxrvis -- npx jxrvis-mcp --inbox feedback/inbox
+   ```
 
-Not on Node at all? Run the standalone server next to your dev server and proxy `/api/feedback` to it, keeping the `Host` header (see [Standalone server](#standalone-server)).
+5. Copy [agents/snippet.md](agents/snippet.md) into the `AGENTS.md` or `CLAUDE.md` file of your project.
+6. Tell the agent: **"watch the feedback"**.
 
-### 3. Client (three.js)
+## Controls in the headset
 
-```ts
-import {attachFeedback} from 'jxrvis/three';
+| Action | Result |
+| --- | --- |
+| Hold B or Y and speak (desktop: F) | jXRvis takes a screenshot. It records your voice until you release the button. |
+| Speak the words **"take a screenshot"** | jXRvis takes one more screenshot. The maximum is 8 for each take. |
+| Push A or X (desktop: P) while you speak | jXRvis takes one more screenshot immediately. |
+| Listen | The headset shows and speaks the replies from the agent. |
+| Hold B again after a question | jXRvis sends your answer to the agent. |
 
-const feedback = attachFeedback({
-  renderer, scene, camera,
-  agentName: 'Claude',                                  // the label shows "Claude: Done: …"
-  context: () => ({summary: `level ${level}; ${menu.open ? 'menu open' : 'playing'}`, level, score}),
-  hidden: () => [menu.root],                            // left out of the snapshot
-  holdButtons: [{hand: 'right', button: 5}, {hand: 'left', button: 5}],  // B and Y (default)
-  key: 'f',                                             // desktop hold-to-talk (default); null for none
-  sound: event => sfx.play(event),                      // 'start' | 'saved' | 'status' | 'error'
-  voice: 'auto',                                        // read replies aloud; 'off' to mute (see Voice)
-  onMessage: text => console.info(text),                // the same messages, outside XR
-});
+## Important information
 
-renderer.setAnimationLoop((time, frame) => {
-  feedback.update(clock.getDelta());                    // polls B/Y, keeps the label in view
-  renderer.render(scene, camera);
-});
+- **Transcripts.** To change your voice into text, start the local Whisper server in [tools/](tools/whisper-server.py). An NVIDIA GPU is best. If you do not start it, the agent receives the voice file, the screenshots and the app state. The words "take a screenshot" then have no effect. The A and X buttons continue to operate.
+- **Microphone.** The browser gives the microphone only to `https://` pages and to `http://localhost`. If the Quest has a USB cable to the PC, type `adb reverse tcp:5173 tcp:5173`. Then open `http://localhost:5173` on the Quest. A certificate is then not necessary.
+- **Other engines and servers.** jXRvis also has a client for all engines, a middleware for Node servers and a standalone server. All agents that can read a folder can use the takes.
 
-menuButton.onClick = () => feedback.toggle();           // a menu "Feedback" button (works with hands)
-```
-
-Hold B/Y (or F): the view is taken as the button goes down, the voice records until you let go. A menu toggle takes the view 1.5 s later, so you can look back at the scene. Takes under 0.4 s are dropped; recordings stop at 90 s. All of this is in `timing`.
-
-#### More screenshots while you talk
-
-The first view is taken as you start. While you keep talking you can add more, up to 8 per take:
-
-- **Say "take a screenshot"** (or "take another screenshot", "grab a snapshot", "take a picture"). The client sends what you have said so far to the dev PC every 1.5 s, and the transcriber listens to the newest part. When the phrase shows up, a view is taken. That is about a second after you say it, so keep looking at the thing. This needs a transcriber that can listen: the Whisper server in `tools/` can, and on a GPU it keeps up easily. On a CPU it may lag; use the button.
-- **Press A or X** (desktop: **P**) while recording: a view right away. `shotButtons` and `shotKey` change them; `[]` / `null` turn them off.
-
-The label confirms each one ("● Recording… screenshot 2 taken"). They are saved as `view-2.png`, `view-3.png`, … with `views.json` saying when (seconds into the recording) and how each was taken, so the agent can match them to what you said. `shotPhrase` takes your own regular expression (another language, another wording), or `null` for button only.
-
-#### Voice: hearing the agent, answering it
-
-Your eyes are on the scene, so the agent's replies are spoken as well as shown. `Question`, `Done` and `Skipped` lines are read aloud ("Done. Ball moved down, reload to see"); `On it` only plays the `status` sound. Speech stops when you start recording, so the agent's voice never ends up in your take.
-
-When the agent asks a `Question`, it is read with a hint ("Hold the talk button to answer"). Your next take is recorded as the answer: the label says "Answering…", and the take's context gets `replyTo` (the asking take) and `question`. The agent sees it as an answer and carries on with the original take, whose status you keep following, so the conversation goes *you talk → it asks → you answer → "Done"* without leaving the headset.
-
-Where the voice comes from (`voice` option):
-
-- `'auto'` (default): the server's speech route when it has one, else the browser's own text-to-speech (Web Speech API, no network).
-- `'browser'`, `'server'`, `'off'`, or your own `text => …` function (an in-game character, a spatial audio source). `feedback.client.voice = 'off'` mutes it at runtime.
-- `voiceLang: 'en-US'` picks the browser voice's language; `speakPrefixes` picks which statuses are spoken.
-
-If the headset's browser has no voices installed, give the server one: `speech: 'http://127.0.0.1:5002/speak'` (Vite plugin, middleware) or `--speech <url>` (standalone). Any local text-to-speech server that takes `POST {"text": "…"}` and answers WAV, MP3, OGG or WebM audio fits (Piper, Kokoro, Coqui behind a small wrapper), or pass a function `speech: async text => ({audio, type: 'audio/wav'})`. The headset then plays the audio the PC makes, and nothing leaves the PC.
-
-### 3b. Client (any engine)
-
-The core has no 3D in it. Give it a snapshot function and somewhere to show text:
-
-```ts
-import {createFeedbackClient, bindKey} from 'jxrvis/client';
-
-const client = createFeedbackClient({
-  snapshot: () => ({image: canvas.toDataURL('image/png'), details: {xr: inXR}}),
-  context: () => ({summary: 'main menu'}),
-  show: (text, seconds) => myLabel.set(text, seconds),
-});
-bindKey(client, {key: 'f'});
-// controller: client.holdDown() on press, client.release() on release; menu: client.toggle()
-```
-
-Native Unity or Unreal clients: implement the four HTTP calls and the client behaviour in [SPEC.md](SPEC.md); everything else (server, agent bridge) works unchanged.
-
-### 4. Agent
-
-Copy [agents/snippet.md](agents/snippet.md) into your project's `AGENTS.md` (or `CLAUDE.md`), or install [agents/skills/jxrvis/SKILL.md](agents/skills/jxrvis/SKILL.md) as a skill. It holds the live-mode rules: small fixes go in without asking, risky or ambiguous ones are asked first, status lines stay under ~70 characters, and a fix note is written at the end.
-
-Then connect the agent to the inbox in one of three ways.
-
-**MCP** (Claude Code, Codex, Cursor, Windsurf, Cline, any MCP client). Tools: `next_feedback` (waits for the next take; returns transcript, context, file paths and every view the player took as images), `list_feedback`, `get_feedback`, `set_status(id, text)`.
-
-```bash
-claude mcp add jxrvis -- npx jxrvis-mcp --inbox feedback/inbox
-```
-
-Other clients, in their MCP config:
-
-```json
-{"mcpServers": {"jxrvis": {"command": "npx", "args": ["jxrvis-mcp", "--inbox", "feedback/inbox"]}}}
-```
-
-Then tell the agent "watch the feedback".
-
-**Watcher**: for agents that can follow a command's output (Claude Code's Monitor tool, a terminal multiplexer, a script):
-
-```bash
-npx jxrvis-watch --inbox feedback/inbox
-```
-
-It prints `FEEDBACK <id> [<summary>] (+N screenshots): <transcript>` once per new take, when the transcript is in, and `ANSWER <id> to <asking id> [<question>]: <transcript>` when the player answers one of the agent's questions.
-
-**Plain files**: any agent can list `feedback/inbox/`, read a take and append a line to its `status.txt`. That is the whole contract.
-
-## Transcription
-
-Without a transcriber, takes keep their voice file and the agent works from the view and context (or listens, if it can). For transcripts, run the local Whisper server ([tools/whisper-server.py](tools/whisper-server.py)): it uses CUDA when there is an NVIDIA GPU and the CPU otherwise, and nothing leaves the PC.
-
-```bash
-python -m venv .venv
-```
-
-```bash
-.venv/Scripts/pip install -r tools/requirements-whisper.txt
-```
-
-```bash
-.venv/Scripts/python tools/whisper-server.py --model turbo
-```
-
-(macOS/Linux: `.venv/bin/…`. Needs ffmpeg on PATH. For a GPU, install the CUDA build of torch first. The first start downloads the model; `turbo` is 1.6 GB.) Then set `transcribe: 'http://127.0.0.1:8788/transcribe'`. It also answers `?from=<seconds>` requests, which the headset uses to hear "take a screenshot" while you talk. Options: `--language en` to skip detection, `--prompt "Words your app uses"` for names and jargon, `--model small` for a faster CPU.
-
-Any function works too: `transcribe: async (audio, {type}) => myService(audio, type)`. Return `null` for "no transcript"; throw and the voice is still kept.
-
-## Headset: HTTPS and the microphone
-
-The browser gives a page the microphone only over `https://` or on `http://localhost`. Pick one:
-
-- **adb reverse (USB, no certificates)**: with the Quest plugged in and developer mode on, `adb reverse tcp:5173 tcp:5173`, then open `http://localhost:5173` in the Quest browser.
-- **Self-signed HTTPS on the LAN**: `@vitejs/plugin-basic-ssl` (what the example uses) and `vite --host 0.0.0.0`. Open `https://<pc-ip>:5173` and accept the warning once.
-- **A trusted local certificate**: `mkcert -install && mkcert 192.168.1.20 localhost` makes certificates your PC trusts. Pass them to Vite's `server.https` or to the standalone server's `--cert/--key`. The Quest does not trust the mkcert root by default, so you still accept the warning once there.
-
-If your dev server speaks HTTP/2 (Vite does with HTTPS), the inbox checks the origin against `:authority`; that is handled.
-
-## Standalone server
-
-For projects not served by a Node dev server, for native clients, or to serve a built app:
-
-```bash
-npx jxrvis-server --inbox feedback/inbox --static dist --host 0.0.0.0 --cert pc.pem --key pc-key.pem --transcribe http://127.0.0.1:8788/transcribe
-```
-
-Without `--cert/--key` it speaks plain HTTP (fine for desktop and adb reverse). To use it beside another dev server, proxy `/api/feedback` to it and keep the original `Host` header (in Vite's `server.proxy`, leave `changeOrigin` off), because the inbox only accepts requests whose `Origin` matches the host.
-
-## Develop
-
-```bash
-npm test
-```
-
-```bash
-npm run verify
-```
-
-`verify` typechecks, runs the tests, builds the package and builds the example. TypeScript sources run directly under Node (`--experimental-strip-types`); `npm run build` writes `dist/`.
-
-## Related
-
-- **IWSDK's AI-assisted dev tooling** ([docs](https://developers.meta.com/horizon/documentation/web/iwsdk-ai-assisted-dev-tooling)): an MCP server beside Vite that lets an agent take canvas screenshots, read console logs, reload and drive emulated headset input. It is the agent looking at the app; jXRvis is the *player* in a real headset telling the agent what they saw, and hearing back. They work well together, and jXRvis does not duplicate those screenshot or control tools.
-- **Meta's in-headset playtesting feedback**: captures and voice from the headset, sent to the Developer Dashboard for people to read. No agent, no live answer in the headset.
-- **talkthrough-mcp**: narrated desktop screen recordings turned into issue drafts by a local MCP server.
-- **MCPFeedback, MarkLayer** and similar: annotated web screenshots as bug reports for agents.
+The [guide](docs/guide.md) gives all the options. [SPEC.md](SPEC.md) gives the file format and the HTTP routes.
 
 ## Status
 
-Version 0.1, extracted from the live feedback loop of a Quest 3 mixed-reality game, where the same loop is in use. As a package it is verified on desktop: the example page saves takes end to end (view, voice, context, Whisper transcript) and follows status lines. It has not yet been run on a Quest in this packaged form; the XR code paths (eye view of the left eye, B/Y buttons, head-locked label) are ported from the game, where they run on Quest 3.
+This is version 0.1. It comes from the feedback system of a Quest 3 game. We tested this package on a desktop computer. We did not test this package on a Quest.
 
 ## License
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// jXRvis: the feedback inbox as a server of its own (SPEC.md). See README "Standalone server".
+// jXRvis: the feedback inbox as a server of its own (SPEC.md). See docs/guide.md "Standalone server".
 import {networkInterfaces} from 'node:os';
 import {parseArgs} from 'node:util';
 import {DEFAULT_INBOX} from '../spec.ts';

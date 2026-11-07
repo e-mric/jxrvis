@@ -39,6 +39,7 @@
     "dist",
     "tools",
     "agents",
+    "docs",
     "SPEC.md",
     "AGENTS.md",
     "README.md"
