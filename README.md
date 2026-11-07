@@ -4,13 +4,7 @@
 
 jXRvis connects a WebXR headset to an AI coding agent (Claude Code, Codex, Cursor or other agents). You test your app in the headset. When you see a problem, you hold the B button and you speak. The agent receives a screenshot, your words and the app state. The agent changes the code. Then the agent replies in your view and in your ear. You do not remove the headset.
 
-```mermaid
-flowchart LR
-  H["🥽 Headset<br/>hold B and speak"] -- "screenshot + voice" --> I["📁 feedback/inbox/&lt;id&gt;/<br/>on your PC"]
-  I -- "the agent reads the take" --> A["🤖 AI agent<br/>changes the code"]
-  A -- "the agent writes status.txt" --> I
-  I -- "the headset shows and speaks the reply" --> H
-```
+![jXRvis workflow: speak in VR, the screenshot and voice are saved, the AI agent fixes the code, the reply comes back in your headset](docs/workflow.png)
 
 All data stays on your PC. jXRvis does not use a cloud service. Git does not record the feedback files.
 
