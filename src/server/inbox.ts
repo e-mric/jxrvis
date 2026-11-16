@@ -111,6 +111,18 @@ export function feedbackInbox({root,transcribe,speech:speechOption,base=DEFAULT_
     const forwarded=req.headers['x-forwarded-for']!==undefined||req.headers.forwarded!==undefined;
     return !(LOOPBACK.has(from)&&!forwarded)&&!trusted.has(from);
   };
+  /**
+   * The device a request comes from. Through a proxy on this PC, that is the address the proxy added last to
+   * X-Forwarded-For (or Forwarded), so one device's wrong tokens do not lock out the others behind the proxy.
+   */
+  const client=(req:Request)=>{
+    const from=plain(req.socket?.remoteAddress);
+    if(!LOOPBACK.has(from))return from;
+    const xff=req.headers['x-forwarded-for'],fwd=req.headers.forwarded;
+    const last=(typeof xff==='string'?xff.split(',').at(-1)?.trim():undefined)
+      ??(typeof fwd==='string'?[...fwd.matchAll(/for="?\[?([^\]";,]+)/gi)].at(-1)?.[1]:undefined);
+    return last?`via proxy ${plain(last)}`:from;
+  };
   const tokenOk=(req:Request)=>{
     const sent=req.headers[TOKEN_HEADER];
     const given=Buffer.from(typeof sent==='string'?sent.trim():'');
@@ -132,8 +144,8 @@ export function feedbackInbox({root,transcribe,speech:speechOption,base=DEFAULT_
       if(from!==host)return reply(403,{error:'Origin not allowed'});
     }
     if(token&&needsToken(req)){
-      // Wrong tokens are counted per address; after 10 in a minute even the right one waits, so none can be guessed.
-      const address=plain(req.socket?.remoteAddress),at=Date.now();
+      // Wrong tokens are counted per device; after 10 in a minute even the right one waits, so none can be guessed.
+      const address=client(req),at=Date.now();
       const list=misses.get(address)??[];
       if(recent(list,at)>=10)return reply(429,{error:'Too many wrong tokens, wait a minute'});
       if(!tokenOk(req)){

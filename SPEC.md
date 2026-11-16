@@ -138,7 +138,8 @@ Takes go to an AI agent that changes code, so only the player's own devices may 
 
 - The token is 12 letters and digits. By default the server makes one and keeps it in `{inbox}/.token`, so it stays the same when the server restarts. A server can be given its own token, or none (then any device that can reach it can send takes).
 - When the server listens on the network, it prints the page address with `#jxrvis=<token>` added. The player opens that address one time on the headset. The client keeps the token (in `localStorage`), removes it from the address, and sends it with each request.
-- A request that a proxy passed on (it has `X-Forwarded-For` or `Forwarded`) counts as from another address, even when the proxy is on the dev PC.
+- A request that a proxy passed on (it has `X-Forwarded-For` or `Forwarded`) counts as from another address, even when the proxy is on the dev PC. When that proxy is on the dev PC, wrong tokens are counted for the address it added last, so one device cannot lock out the others behind it.
+- The server never serves the inbox (takes, `.token`) or the `notes` folder next to it as static files, by any URL. A dev server that serves its whole folder, as Vite does, would otherwise give the token and the takes to any device that can reach it.
 - A server can trust more addresses (for example the headset's IP), which then need no token.
 
 ### Secure context

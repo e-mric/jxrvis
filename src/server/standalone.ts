@@ -4,6 +4,7 @@ import http2 from 'node:http2';
 import type {AddressInfo} from 'node:net';
 import {extname,join,resolve,sep} from 'node:path';
 import {feedbackInbox,hostAllowed,type InboxOptions,type Request,type Response} from './inbox.ts';
+import {privateFolders,requestsPrivate} from './private.ts';
 
 export interface ServerOptions extends InboxOptions{
   /** A folder of static files to serve next to the inbox (a built WebXR app, the example page). */
@@ -15,8 +16,10 @@ export interface ServerOptions extends InboxOptions{
 
 const TYPES:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.svg':'image/svg+xml','.glb':'model/gltf-binary','.gltf':'model/gltf+json','.wasm':'application/wasm','.ico':'image/x-icon','.webp':'image/webp','.mp3':'audio/mpeg','.ogg':'audio/ogg','.wav':'audio/wav','.mp4':'video/mp4','.ktx2':'image/ktx2','.bin':'application/octet-stream','.txt':'text/plain; charset=utf-8'};
 
-function serveStatic(folder:string,req:Request,res:Response){
+function serveStatic(folder:string,hidden:string[],req:Request,res:Response){
   const root=resolve(folder);
+  // The inbox and the notes are never static files, even when the static folder contains them.
+  if(requestsPrivate(req.url,root,hidden)){res.writeHead(404,{'Content-Type':'text/plain'});res.end('Not found');return;}
   let path:string;try{path=decodeURIComponent(new URL(req.url??'/','http://localhost').pathname);}catch{path='/';}
   let file=resolve(join(root,path));
   if(file!==root&&!file.startsWith(root+sep)){res.writeHead(403);res.end();return;}
@@ -33,11 +36,12 @@ function serveStatic(folder:string,req:Request,res:Response){
  */
 export function createFeedbackServer(options:ServerOptions){
   const handle=feedbackInbox(options);
+  const hidden=options.static?privateFolders(options.root,options.static):[];
   const listener=(req:Request,res:Response)=>{
     // Against DNS rebinding: a page on another domain that now points at this PC is refused, static files too.
     if(!hostAllowed(req.headers.host??req.headers[':authority'],options.allowedHosts)){res.writeHead(403,{'Content-Type':'text/plain'});res.end('Host not allowed');return;}
     void handle(req,res,()=>{
-      if(options.static&&(req.method==='GET'||req.method==='HEAD'))return serveStatic(options.static,req,res);
+      if(options.static&&(req.method==='GET'||req.method==='HEAD'))return serveStatic(options.static,hidden,req,res);
       res.writeHead(404,{'Content-Type':'text/plain'});res.end('Not found');
     }).catch(error=>{options.log?.(`request failed: ${String(error).slice(0,200)}`);if(!res.headersSent)res.writeHead(500);res.end('Server error');});
   };

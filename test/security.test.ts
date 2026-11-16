@@ -10,6 +10,8 @@ import {feedbackInbox,hostAllowed,pairingToken,type InboxOptions} from '../src/s
 import {createFeedbackServer} from '../src/server/standalone.ts';
 import {describe,oneLine,readTake} from '../src/agent/inbox.ts';
 import {createFeedbackClient} from '../src/client/core.ts';
+import {privateFolders,requestsPrivate} from '../src/server/private.ts';
+import {jxrvis} from '../src/server/vite.ts';
 
 const PNG=Buffer.from('89504e470d0a1a0a0000000d49484452','hex');
 const IMAGE=`data:image/png;base64,${PNG.toString('base64')}`;
@@ -153,4 +155,70 @@ test('the client sends its pairing token with every request, and asks to pair on
     assert.deepEqual(seen,['abcdefghjkmn']);
     assert.match(shown.at(-1)??'',/Pair this headset/);
   }finally{client.dispose();}
+});
+
+/** A project folder like the ones Vite serves: the page at the top, the inbox and the notes under feedback/. */
+const slash=(path:string)=>path.replaceAll(String.fromCharCode(92),'/');
+
+function project(){
+  const site=temp();
+  writeFileSync(join(site,'index.html'),'<h1>app</h1>');
+  const inbox=join(site,'feedback','inbox');
+  mkdirSync(join(inbox,'2026-11-03_18-42-07'),{recursive:true});mkdirSync(join(site,'feedback','notes'));
+  writeFileSync(join(site,'feedback','README.md'),'about feedback');
+  writeFileSync(join(inbox,'2026-11-03_18-42-07','view.png'),PNG);
+  writeFileSync(join(site,'feedback','notes','note.md'),'fix note');
+  pairingToken(inbox);
+  return {site,inbox};
+}
+
+test('the takes, the pairing token and the notes are never served as files, whatever the URL',()=>{
+  const {site,inbox}=project();
+  const hidden=privateFolders(inbox,site);
+  const fs=`/@fs/${slash(site)}`;
+  for(const url of ['/feedback/inbox/.token','/feedback/inbox/2026-11-03_18-42-07/view.png','/feedback/notes/note.md','/feedback/inbox/',
+    '/feedback/inbox/.token?raw','/%66eedback/inbox/.token','/feedback//inbox/.token','/x/../feedback/inbox/.token',
+    `${fs}/feedback/inbox/.token`,`${fs}/feedback/notes/note.md`,'/@id/'+slash(site)+'/feedback/inbox/.token','/%E0%A4%A'])
+    assert.ok(requestsPrivate(url,site,hidden),url);
+  if(process.platform==='win32')for(const url of ['/feedback/inbox./.token','/feedback/inbox%20/.token','/FEEDBACK/INBOX/.token','/feedback/inbox::$INDEX_ALLOCATION/.token'])
+    assert.ok(requestsPrivate(url,site,hidden),url);
+  for(const url of ['/','/index.html','/feedback/README.md','/api/feedback/health','/feedback/inboxes.html'])
+    assert.ok(!requestsPrivate(url,site,hidden),url);
+  assert.deepEqual(privateFolders(join(site,'inbox'),site),[join(site,'inbox')],'an inbox at the top does not hide its parent, the web root');
+});
+
+test('the Vite plugin and the standalone server refuse the inbox and the notes as static files',async()=>{
+  const {site,inbox}=project();
+  const handlers:((req:any,res:any,next:()=>void)=>void)[]=[];
+  jxrvis({transcribe:'none'}).configureServer({config:{root:site,logger:{info:()=>{}}},middlewares:{use:h=>{handlers.push(h);}}});
+  const vite=createServer((req,res)=>{
+    const run=(i:number):void=>{if(i<handlers.length)handlers[i](req,res,()=>run(i+1));else{res.writeHead(200);res.end('vite would serve this');}};
+    run(0);
+  });
+  vite.listen(0,'127.0.0.1');await once(vite,'listening');
+  const vport=(vite.address() as {port:number}).port;
+  const standalone=createFeedbackServer({root:inbox,static:site});
+  const {port}=await standalone.listen();
+  try{
+    for(const p of [vport,port]){
+      assert.equal((await send(p,'GET','/feedback/inbox/.token')).status,404);
+      assert.equal((await send(p,'GET','/feedback/inbox/2026-11-03_18-42-07/view.png')).status,404);
+      assert.equal((await send(p,'GET','/feedback/notes/note.md')).status,404);
+      assert.equal((await send(p,'GET','/index.html')).status,200);
+      assert.equal((await send(p,'GET','/api/feedback/health')).status,200,'the routes still work');
+    }
+  }finally{vite.close();await standalone.close();}
+  assert.ok(readdirSync(inbox).includes('.token'));
+});
+
+test('behind a proxy on this PC, wrong tokens lock out only the device that sent them',async()=>{
+  const t=await inbox({token:'abcdefghjkmn'});
+  try{
+    const from=(address:string,token:string)=>send(t.port,'GET','/api/feedback/health',{headers:{'x-forwarded-for':`10.9.9.9, ${address}`,'x-jxrvis-token':token}});
+    for(let i=0;i<10;i++)assert.equal((await from('192.168.1.66',`wrongwrong${i}`)).status,401);
+    assert.equal((await from('192.168.1.66','abcdefghjkmn')).status,429,'the guessing device waits');
+    assert.equal((await from('192.168.1.30','abcdefghjkmn')).status,200,'the paired headset behind the same proxy does not');
+    // A device cannot pick its own lock: the proxy adds the real address last.
+    assert.equal((await send(t.port,'GET','/api/feedback/health',{headers:{'x-forwarded-for':'192.168.1.30, 192.168.1.66','x-jxrvis-token':'abcdefghjkmn'}})).status,429);
+  }finally{t.close();}
 });

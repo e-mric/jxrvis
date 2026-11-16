@@ -1,6 +1,7 @@
 import {resolve} from 'node:path';
 import {DEFAULT_INBOX} from '../spec.ts';
 import {feedbackInbox,pairingToken,type InboxOptions} from './inbox.ts';
+import {privateFolders,requestsPrivate} from './private.ts';
 
 export interface VitePluginOptions extends Omit<InboxOptions,'root'>{
   /** The inbox folder, relative to Vite's root. Default feedback/inbox. */
@@ -27,6 +28,12 @@ export function jxrvis(options:VitePluginOptions={}){
     const token=options.token===false?false:options.token??pairingToken(root);
     // Vite checks the Host header itself (server.allowedHosts), so the inbox does not check it again.
     const handle=feedbackInbox({allowedHosts:true,...options,token,root,log});
+    // Vite serves every file under its root (and others through /@fs/): never the takes, the token or the notes.
+    const hidden=privateFolders(root,server.config.root);
+    server.middlewares.use((req,res,next)=>{
+      if(requestsPrivate(req.url,server.config.root,hidden)){res.statusCode=404;res.setHeader('Content-Type','text/plain');res.end('Not found');return;}
+      next();
+    });
     server.middlewares.use((req,res,next)=>{void handle(req,res,next).catch(next);});
     // On the network (--host), a headset pairs one time: it opens the page with the token.
     server.httpServer?.once('listening',()=>setTimeout(()=>{

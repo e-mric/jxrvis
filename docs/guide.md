@@ -362,7 +362,7 @@ You do this one time for each headset and browser. The token stays the same when
 
 If the headset is not paired, it shows "Pair this headset" when you hold B.
 
-> **Caution:** Use adb reverse if you can. With `--host 0.0.0.0`, all devices on the network can open your page and read your source code through Vite. The token stops them only from sending takes.
+> **Caution:** Use adb reverse if you can. With `--host 0.0.0.0`, all devices on the network can open your page and read your source code through Vite. The token stops them only from sending takes. jXRvis does not let Vite serve the inbox (the takes and the token) or `feedback/notes`.
 
 Options of the server, the Vite plugin and the middleware:
 
@@ -392,7 +392,9 @@ With `--host 0.0.0.0`, the server writes the pairing addresses. See [Pair a head
 
 To use the standalone server with a different dev server, send `/api/feedback` to it through a proxy. Keep the original `Host` header, and add the `X-Forwarded-For` header. In the `server.proxy` option of Vite, do not set `changeOrigin`, and set `xfwd: true`.
 
-> **Caution:** The inbox accepts a request only if its `Origin` agrees with the host. If the proxy changes the `Host` header, the inbox refuses all requests. Without `X-Forwarded-For`, all requests through the proxy come from the PC, so they need no pairing token.
+> **Caution:** The inbox accepts a request only if its `Origin` agrees with the host. If the proxy changes the `Host` header, the inbox refuses all requests. Without `X-Forwarded-For`, all requests through the proxy come from the PC, so they need no pairing token. With it, a device that sends wrong tokens locks out only itself.
+
+The standalone server does not serve the inbox or `feedback/notes` as static files, also when `--static` contains them.
 
 ## Develop
 
