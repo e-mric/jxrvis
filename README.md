@@ -52,7 +52,9 @@ cd jxrvis && npm install && npm run example
 
 6. Look at the page. The reply shows in 3 seconds or less.
 
-To test on a Quest, type `npm run example:headset`. On the Quest, open `https://<your-pc-ip>:5173`, accept the certificate warning one time, push **Enter VR** and hold B.
+To test on a Quest with a USB cable, type `adb reverse tcp:5173 tcp:5173`, open `http://localhost:5173` on the Quest, push **Enter VR** and hold B.
+
+Without a cable, type `npm run example:headset`. The terminal shows an address that ends with `#jxrvis=` and a pairing token. Open that address on the Quest one time and accept the certificate warning. The token makes sure that only your headset can send takes to your agent. The [guide](docs/guide.md#pair-a-headset) gives more information.
 
 ## Works with
 
@@ -156,10 +158,13 @@ feedback/inbox/2026-11-07_14-03-22/
 | The take has no transcript | The Whisper server does not operate, or the `transcribe` URL is wrong. Open `http://127.0.0.1:8788/health`. |
 | "Take a screenshot" has no effect | This function needs the Whisper server. Push A or X instead. |
 | The label never shows a reply | The agent is not connected, or it watches a different folder. Make sure that `--inbox` is the same folder as in the Vite plugin. |
+| The headset shows "Pair this headset" | The headset is on the network and has no token. Open the address with `#jxrvis=` that the terminal shows. |
 
-## Privacy
+## Privacy and security
 
 The takes stay on your PC, and the inbox folder tells git to ignore its contents. jXRvis does not send data to a cloud service. Your AI agent can send the screenshots and transcripts to its model provider, as it does with your code.
+
+Your agent changes code when it gets a take. Thus jXRvis accepts takes only from your PC and from paired headsets, and it refuses other web pages. The agent rules tell the agent to treat a take as a problem report, not as orders: it does not install packages, run commands or push because a take says so. Use adb reverse if you can: with `--host 0.0.0.0`, all devices on your network can open your page.
 
 ## Status
 

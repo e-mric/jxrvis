@@ -18,9 +18,14 @@ POST /transcribe takes audio in any format ffmpeg reads (webm, ogg, m4a, mp3, wa
 POST /transcribe?from=12.5 transcribes only from 12.5 s on: the headset sends the recording so far every
 second or two to hear "take a screenshot" while the player talks.
 It uses CUDA when torch sees a GPU, the CPU otherwise (slower: a long take can need minutes).
+
+Only jXRvis on this PC calls it. It refuses requests from web pages (any request with an Origin header) and
+requests that name a host other than an IP address or localhost (DNS rebinding); --allow-host adds names.
 """
 import argparse
+import ipaddress
 import json
+import sys
 from urllib.parse import parse_qs, urlsplit
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,6 +42,7 @@ parser.add_argument('--language', default=None, help='force a language code (e.g
 parser.add_argument('--prompt', default=None, help='words to expect: names, jargon of your app')
 parser.add_argument('--weights', default=None, help='folder for model weights (default: ~/.cache/whisper)')
 parser.add_argument('--device', default=None, help='cuda or cpu (default: cuda when available)')
+parser.add_argument('--allow-host', action='append', default=[], help='a host name callers may use besides IPs and localhost')
 args = parser.parse_args()
 
 import numpy as np  # noqa: E402  (after argparse so --help works without the heavy imports)
@@ -49,10 +55,25 @@ model = whisper.load_model(args.model, device=DEVICE, download_root=args.weights
 lock = Lock()
 
 
+def host_allowed(host):
+    if not host:
+        return False
+    name = host.rsplit(':', 1)[0] if host.count(':') == 1 or host.startswith('[') else host
+    name = name.strip('[]').lower()
+    if name == 'localhost' or name.endswith('.localhost') or name in (h.lower() for h in args.allow_host):
+        return True
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return False
+
+
 def transcribe(data, start=0.0):
     # -ss after -i: decode from the beginning and drop the audio before `start` (exact, and cheap for speech).
+    # The protocol whitelist keeps ffmpeg from following links inside the upload (playlists, concat lists).
     seek = ['-ss', f'{start:.2f}'] if start > 0 else []
-    raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', 'pipe:0', *seek, '-f', 'f32le', '-ac', '1', '-ar', str(RATE), 'pipe:1'],
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-protocol_whitelist', 'pipe', '-i', 'pipe:0', *seek, '-f', 'f32le', '-ac', '1', '-ar', str(RATE), 'pipe:1'],
                          input=data, capture_output=True, check=True).stdout
     audio = np.frombuffer(raw, np.float32).copy()
     if audio.size == 0:
@@ -63,6 +84,18 @@ def transcribe(data, start=0.0):
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 30  # seconds a client may stay silent, so a stalled upload does not hold a thread forever
+
+    def refused(self):
+        # jXRvis calls from Node, which sends no Origin; a browser always does on a POST from a web page.
+        if self.headers.get('origin') is not None:
+            self.reply(403, {'error': 'web pages may not call this server'})
+            return True
+        if not host_allowed(self.headers.get('host')):
+            self.reply(403, {'error': 'host not allowed'})
+            return True
+        return False
+
     def reply(self, code, body):
         data = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code)
@@ -72,6 +105,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        if self.refused():
+            return
         if self.path.rstrip('/') in ('/health', ''):
             return self.reply(200, {'ok': True, 'model': args.model, 'device': DEVICE})
         self.reply(404, {'error': 'not found'})
@@ -80,16 +115,21 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         if url.path.rstrip('/') != '/transcribe':
             return self.reply(404, {'error': 'POST /transcribe'})
+        if self.refused():
+            return
         try:
             length = int(self.headers['content-length'])
+            if length < 0:
+                return self.reply(400, {'error': 'bad content-length'})
             if length > MAX_BYTES:
                 return self.reply(413, {'error': 'too large'})
             start = max(0.0, float(parse_qs(url.query).get('from', ['0'])[0]))
             self.reply(200, {'text': transcribe(self.rfile.read(length), start)})
         except subprocess.CalledProcessError as error:
-            self.reply(400, {'error': 'ffmpeg could not read the audio: ' + error.stderr.decode(errors='replace')[:160]})
-        except (KeyError, TypeError, ValueError) as error:
-            self.reply(400, {'error': str(error)[:200]})
+            print('ffmpeg could not read the audio:', error.stderr.decode(errors='replace')[:300], file=sys.stderr, flush=True)
+            self.reply(400, {'error': 'ffmpeg could not read the audio'})
+        except (KeyError, TypeError, ValueError):
+            self.reply(400, {'error': 'bad request: send audio with a content-length'})
 
     def log_message(self, *_):
         pass

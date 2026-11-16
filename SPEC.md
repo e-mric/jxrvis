@@ -113,20 +113,33 @@ Served by the dev server the headset page comes from (same origin), under a base
 | Method and path | Request | Reply |
 | --- | --- | --- |
 | `GET {base}/health` | — | `200 {"ok":true,"transcriber":"none"\|"<name>","speech":"none"\|"<name>","listen":true\|false}` |
-| `POST {base}` | `Content-Type: application/json`, body `{"image":"data:image/png;base64,…","context":{…}}`. `image` must be a PNG or JPEG data URL. Up to 16 MB. | `200 {"id":"…"}`. The take folder now holds the view and context. |
-| `POST {base}/{id}/view` | `Content-Type: application/json`, body `{"image":"data:image/png;base64,…","seconds":4.2,"trigger":"voice"\|"button","head":{…}}`. Only before the voice arrives. | `200 {"id":"…","file":"view-2.png"}`. `409` once the take has its voice. |
+| `POST {base}` | `Content-Type: application/json`, body `{"image":"data:image/png;base64,…","context":{…}}`. `image` must be a PNG or JPEG data URL. Up to 16 MB. | `200 {"id":"…"}`. The take folder now holds the view and context. The server writes `savedAt` and `transcriber` after the client's context, so the client cannot set them. `429` after 30 new takes in one minute. |
+| `POST {base}/{id}/view` | `Content-Type: application/json`, body `{"image":"data:image/png;base64,…","seconds":4.2,"trigger":"voice"\|"button","head":{…}}`. Only before the voice arrives. | `200 {"id":"…","file":"view-2.png"}`. `409` once the take has its voice, or when it has 8 extra views. |
 | `POST {base}/listen?from=<s>` | Optional. The recording so far, raw audio as for the voice. `from`: seconds into it where to start listening (default 0). | `200 {"text":"…"}`: the transcript of the audio from `from` to the end. Clients poll it during a recording to hear spoken commands ("take a screenshot") while the player talks. `404` when the transcriber cannot listen (`"listen":false` in health). Nothing is stored. |
-| `POST {base}/{id}/voice` | Body is the raw audio, `Content-Type` one of the audio types above (parameters such as `;codecs=opus` are allowed). Up to 30 MB. | `200 {"id":"…","transcript":"…"}`, or `200 {"id":"…","transcript":null}` with no transcriber, or `200 {"id":"…","transcript":null,"error":"…"}` when transcription failed (the voice is kept). |
+| `POST {base}/{id}/voice` | Body is the raw audio, `Content-Type` one of the audio types above (parameters such as `;codecs=opus` are allowed). Up to 30 MB. | `200 {"id":"…","transcript":"…"}`, or `200 {"id":"…","transcript":null}` with no transcriber, or `200 {"id":"…","transcript":null,"error":"Transcription failed"}` when transcription failed (the voice is kept; the detail goes to the server log only). `409` when the take already has its voice. |
 | `GET {base}/{id}/status` | — | `200 {"status":"On it: …"}` (the current status) or `200 {"status":null}` before the agent writes one. |
 | `POST {base}/speech` | Optional. `Content-Type: application/json`, body `{"text":"…"}`, up to 1000 characters. | `200` with the text spoken as audio (`audio/wav`, `audio/mpeg`, `audio/ogg` or `audio/webm`), for clients that cannot synthesise speech themselves. `404` when the server has no speech engine (`"speech":"none"` in health). |
 
-Errors: `400 {"error":"…"}` for a bad body or unsupported audio type, `403` for a foreign origin, `404` for an unknown or malformed id or route, `413` for a body over the limit. Any path under the base that is not listed answers 404; paths outside the base are left to the rest of the server.
+Errors: `400 {"error":"…"}` for a bad body or unsupported audio type, `401` without the pairing token, `403` for a foreign origin or host, `404` for an unknown or malformed id or route, `409` as listed above, `413` for a body over the limit, `429` for too many takes or wrong tokens. Any path under the base that is not listed answers 404; paths outside the base are left to the rest of the server.
 
 The view goes first, as its own request, so the id and the snapshot match the moment the take started, and so a long recording does not delay it. The voice follows when the take stops.
 
 ### Origin rule
 
-The headset page and the inbox are on the same origin, so browsers send a matching `Origin` (or none). A request with an `Origin` header is refused with `403` unless the origin's `host` (hostname and port) equals the request's host. The request's host is the `Host` header, or, over HTTP/2 (which HTTPS dev servers usually speak), the `:authority` pseudo-header. Requests without `Origin` (curl, native clients, same-origin GETs) are let in. This keeps other web pages the player visits from writing into the inbox; it is not authentication. Serve the inbox on a trusted local network only.
+The headset page and the inbox are on the same origin, so browsers send a matching `Origin` (or none). A request with an `Origin` header is refused with `403` unless the origin's `host` (hostname and port) equals the request's host. The request's host is the `Host` header, or, over HTTP/2 (which HTTPS dev servers usually speak), the `:authority` pseudo-header. Requests without `Origin` (curl, native clients, same-origin GETs) pass this rule. This keeps other web pages the player visits from writing into the inbox. It is not authentication: the pairing rule below is.
+
+### Host rule
+
+Against DNS rebinding (a web page whose own domain is switched to point at the dev PC), the request's host must be an IP address, `localhost` or a `*.localhost` name, or a name the server is configured to allow. Other hosts get `403`. Behind Vite, Vite's own `server.allowedHosts` check does this, and the inbox does not check again.
+
+### Pairing
+
+Takes go to an AI agent that changes code, so only the player's own devices may send them. A request from the dev PC itself (a loopback address: the desktop browser, or a headset through `adb reverse`) needs nothing more. A request from any other address must carry the pairing token in an `X-Jxrvis-Token` header, or it gets `401`; this applies to every route, `health` and `status` included. After 10 wrong tokens from one address in a minute, that address gets `429` for every request, even with the right token, until the minute is over.
+
+- The token is 12 letters and digits. By default the server makes one and keeps it in `{inbox}/.token`, so it stays the same when the server restarts. A server can be given its own token, or none (then any device that can reach it can send takes).
+- When the server listens on the network, it prints the page address with `#jxrvis=<token>` added. The player opens that address one time on the headset. The client keeps the token (in `localStorage`), removes it from the address, and sends it with each request.
+- A request that a proxy passed on (it has `X-Forwarded-For` or `Forwarded`) counts as from another address, even when the proxy is on the dev PC.
+- A server can trust more addresses (for example the headset's IP), which then need no token.
 
 ### Secure context
 

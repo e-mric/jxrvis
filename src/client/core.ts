@@ -47,6 +47,11 @@ export interface ClientOptions{
   microphone?():Promise<MediaStream>;
   recorder?(stream:MediaStream):RecorderLike;
   fetch?:typeof fetch;
+  /**
+   * The pairing token the server asks for when the headset is on another machine (SPEC.md "Pairing").
+   * Default: from `#jxrvis=<token>` in the page address, then kept in localStorage. null: send none.
+   */
+  token?:string|null;
   timing?:Partial<Timing>;
   /** Keep the page's last console errors and send them with each take (default true in a browser). */
   captureErrors?:boolean;
@@ -96,6 +101,28 @@ export function browserVoice(lang?:string):{speak:Speaker;hush():void}|null{
   };
 }
 
+const TOKEN_KEY='jxrvis-token';
+
+/**
+ * The pairing token: from `jxrvis=<token>` in the page address (hash or query), which it then removes from
+ * the address and keeps in localStorage, or the one kept before. null when there is none.
+ */
+export function pairedToken():string|null{
+  if(typeof location==='undefined')return null;
+  let store:Storage|undefined;try{store=localStorage;}catch{}
+  for(const part of ['hash','search'] as const){
+    const params=new URLSearchParams(location[part].slice(1));
+    const value=params.get('jxrvis');
+    if(!value)continue;
+    try{store?.setItem(TOKEN_KEY,value);}catch{}
+    params.delete('jxrvis');
+    const rest=params.toString();
+    try{history.replaceState(history.state,'',`${location.pathname}${part==='search'?(rest?`?${rest}`:''):location.search}${part==='hash'?(rest?`#${rest}`:''):location.hash}`);}catch{}
+    return value;
+  }
+  try{return store?.getItem(TOKEN_KEY)??null;}catch{return null;}
+}
+
 const now=()=>performance.now();
 const asSnapshot=(value:Snapshot|string):Snapshot=>typeof value==='string'?{image:value}:value;
 
@@ -126,7 +153,11 @@ export function watchErrors(keep=20){
 export function createFeedbackClient(options:ClientOptions){
   const base=(options.base??DEFAULT_BASE).replace(/\/$/,'');
   const timing={...DEFAULT_TIMING,...options.timing};
-  const http=options.fetch??((...args:Parameters<typeof fetch>)=>fetch(...args));
+  const raw=options.fetch??((...args:Parameters<typeof fetch>)=>fetch(...args));
+  const token=options.token===undefined?pairedToken():options.token;
+  // Every request carries the pairing token, which the server asks for when the headset is not on this PC.
+  const http=(url:string,init:RequestInit={})=>raw(url,token?{...init,headers:{...init.headers as Record<string,string>,'X-Jxrvis-Token':token}}:init);
+  let unpaired=false;
   const agent=options.agentName??'Agent';
   const errors=(options.captureErrors??typeof window!=='undefined')?watchErrors():undefined;
   const microphone=options.microphone??(()=>navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}));
@@ -145,6 +176,7 @@ export function createFeedbackClient(options:ClientOptions){
   const available=()=>{
     healthy??=http(`${base}/health`,{signal:AbortSignal.timeout(3000)})
       .then(async r=>{
+        unpaired=r.status===401;
         if(!r.ok)return false;
         try{const {speech,listen}=await r.json() as {speech?:string;listen?:boolean};serverSpeech=!!speech&&speech!=='none';canListen=listen===true;}catch{}
         return true;
@@ -233,7 +265,7 @@ export function createFeedbackClient(options:ClientOptions){
     starting=true;releasedEarly=false;
     try{
       hush();
-      if(!await available()){show('Feedback needs the dev server on the PC',3);options.sound?.('error');return;}
+      if(!await available()){show(unpaired?'Pair this headset: open the address with #jxrvis= that the PC shows':'Feedback needs the dev server on the PC',unpaired?8:3);options.sound?.('error');return;}
       // While the agent waits for an answer, the next take is that answer.
       const reply=question;
       // A hold is about what is in front of the eyes now, before the microphone has even opened.

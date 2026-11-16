@@ -12,6 +12,7 @@ The [README](../README.md) gives the short version. This guide gives all the opt
 - [Agent](#agent)
 - [Transcription](#transcription)
 - [HTTPS and the microphone](#https-and-the-microphone)
+- [Pair a headset](#pair-a-headset)
 - [Standalone server](#standalone-server)
 - [Develop](#develop)
 - [Related projects](#related-projects)
@@ -83,11 +84,15 @@ export default defineConfig({
     inbox: 'feedback/inbox',                          // default
     transcribe: 'none',                               // or 'http://127.0.0.1:8788/transcribe', or async (audio, {type}) => text
     speech: undefined,                                // optional text-to-speech URL or function (see Voice)
+    token: undefined,                                 // default: a random pairing token in feedback/inbox/.token
+    trust: [],                                        // more client IPs that need no token, e.g. ['192.168.1.30']
   })],
 });
 ```
 
 The plugin adds the routes to your Vite dev server and to `vite preview`. Thus the routes have the same origin and the same HTTPS as your page. The routes are not in production builds.
+
+When Vite listens on the network (`--host`), the plugin writes the pairing address in the terminal. See [Pair a headset](#pair-a-headset).
 
 ### Other Node servers
 
@@ -97,6 +102,8 @@ Express, connect, the `setupMiddlewares` option of webpack-dev-server and `node:
 import {feedbackInbox} from 'jxrvis/server';
 app.use(feedbackInbox({root: 'feedback/inbox', transcribe: 'none'}));
 ```
+
+The middleware refuses a request that names a host other than an IP address, `localhost` or `*.localhost`. This stops DNS rebinding. If you open your page with a host name, add it: `allowedHosts: ['my-pc.local']`. A name that starts with a dot also allows its subdomains. If your server checks the host itself, set `allowedHosts: true`.
 
 If your dev server does not use Node, use the [standalone server](#standalone-server).
 
@@ -319,6 +326,9 @@ Server options:
 - `--language en`: the server does not try to find the language.
 - `--prompt "Words your app uses"`: helps with names and special words.
 - `--model small`: a faster model for a CPU.
+- `--allow-host my-pc.local`: allow this host name in requests. IP addresses and `localhost` are always allowed.
+
+The Whisper server refuses requests from web pages (requests with an `Origin` header) and requests for other host names. Thus a web page that you open cannot use your GPU. Only jXRvis on your PC calls the Whisper server.
 
 You can also use a function: `transcribe: async (audio, {type}) => myService(audio, type)`. If there is no transcript, return `null`. If the function fails, jXRvis keeps the voice file.
 
@@ -340,6 +350,26 @@ flowchart TD
 
 > **Note:** The Quest does not trust the mkcert certificates. You must accept the warning one time on the Quest.
 
+## Pair a headset
+
+The agent changes your code when it gets a take. Thus only your own devices can send takes. A request from the PC itself needs nothing more: the desktop browser, and a Quest that uses adb reverse. A request from a different device must have the pairing token.
+
+1. Start the dev server on the network, for example `npm run example:headset`.
+2. Find the line `to pair a headset, open this address on it one time` in the terminal. The address under it ends with `#jxrvis=` and the token.
+3. Open that address on the Quest. jXRvis keeps the token in the browser and removes it from the address.
+
+You do this one time for each headset and browser. The token stays the same when you restart the server. To make a new token, delete `feedback/inbox/.token` and restart the server. Then pair each headset again.
+
+If the headset is not paired, it shows "Pair this headset" when you hold B.
+
+> **Caution:** Use adb reverse if you can. With `--host 0.0.0.0`, all devices on the network can open your page and read your source code through Vite. The token stops them only from sending takes.
+
+Options of the server, the Vite plugin and the middleware:
+
+- `token: 'my-own-token'`: use your own token (8 characters or more).
+- `trust: ['192.168.1.30']`: these client IPs need no token.
+- `token: false`: no token. Then all devices that can open the server can send takes to your agent. Use this only on a network that only you use.
+
 ## Standalone server
 
 Use the standalone server in these conditions:
@@ -354,9 +384,15 @@ npx jxrvis-server --inbox feedback/inbox --static dist --host 0.0.0.0 --cert pc.
 
 Without `--cert/--key`, the server uses HTTP. HTTP is satisfactory on a desktop and with adb reverse.
 
-To use the standalone server with a different dev server, send `/api/feedback` to it through a proxy. Keep the original `Host` header. In the `server.proxy` option of Vite, do not set `changeOrigin`.
+With `--host 0.0.0.0`, the server writes the pairing addresses. See [Pair a headset](#pair-a-headset). Security options:
 
-> **Caution:** The inbox accepts a request only if its `Origin` agrees with the host. If the proxy changes the `Host` header, the inbox refuses all requests.
+- `--token <x>`: your own pairing token. `--token none`: no token.
+- `--trust 192.168.1.30,192.168.1.31`: these client IPs need no token.
+- `--allowed-host my-pc.local`: allow this host name in the page address. IP addresses and `localhost` are always allowed.
+
+To use the standalone server with a different dev server, send `/api/feedback` to it through a proxy. Keep the original `Host` header, and add the `X-Forwarded-For` header. In the `server.proxy` option of Vite, do not set `changeOrigin`, and set `xfwd: true`.
+
+> **Caution:** The inbox accepts a request only if its `Origin` agrees with the host. If the proxy changes the `Host` header, the inbox refuses all requests. Without `X-Forwarded-For`, all requests through the proxy come from the PC, so they need no pairing token.
 
 ## Develop
 

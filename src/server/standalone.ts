@@ -3,7 +3,7 @@ import http from 'node:http';
 import http2 from 'node:http2';
 import type {AddressInfo} from 'node:net';
 import {extname,join,resolve,sep} from 'node:path';
-import {feedbackInbox,type InboxOptions,type Request,type Response} from './inbox.ts';
+import {feedbackInbox,hostAllowed,type InboxOptions,type Request,type Response} from './inbox.ts';
 
 export interface ServerOptions extends InboxOptions{
   /** A folder of static files to serve next to the inbox (a built WebXR app, the example page). */
@@ -34,10 +34,12 @@ function serveStatic(folder:string,req:Request,res:Response){
 export function createFeedbackServer(options:ServerOptions){
   const handle=feedbackInbox(options);
   const listener=(req:Request,res:Response)=>{
+    // Against DNS rebinding: a page on another domain that now points at this PC is refused, static files too.
+    if(!hostAllowed(req.headers.host??req.headers[':authority'],options.allowedHosts)){res.writeHead(403,{'Content-Type':'text/plain'});res.end('Host not allowed');return;}
     void handle(req,res,()=>{
       if(options.static&&(req.method==='GET'||req.method==='HEAD'))return serveStatic(options.static,req,res);
       res.writeHead(404,{'Content-Type':'text/plain'});res.end('Not found');
-    }).catch(error=>{if(!res.headersSent)res.writeHead(500);res.end(String(error));});
+    }).catch(error=>{options.log?.(`request failed: ${String(error).slice(0,200)}`);if(!res.headersSent)res.writeHead(500);res.end('Server error');});
   };
   if(!!options.cert!==!!options.key)throw new Error('HTTPS needs both a certificate and a key');
   const server=options.cert&&options.key

@@ -58,11 +58,13 @@ test('with no transcriber a take keeps its voice and gets no transcript',async()
 });
 
 test('the voice is kept when the transcriber is down, so it can be transcribed later',async()=>{
-  const {root,base,close}=await inbox({transcribe:async()=>{throw new Error('speech server offline');}});
+  const logged:string[]=[];
+  const {root,base,close}=await inbox({transcribe:async()=>{throw new Error('speech server offline, password=hunter2');},log:line=>logged.push(line)});
   try{
     const {id}=await view(base).then(r=>r.json()) as {id:string};
     const reply=await (await voice(base,id,'audio/mp4','aac')).json() as {transcript:string|null;error:string};
-    assert.equal(reply.transcript,null);assert.match(reply.error,/offline/);
+    assert.equal(reply.transcript,null);assert.equal(reply.error,'Transcription failed','the headset gets no internal detail');
+    assert.match(logged.join('\n'),/offline/,'the dev server terminal gets the detail');
     assert.ok(existsSync(join(root,id,'voice.m4a')));assert.ok(!existsSync(join(root,id,'transcript.txt')));
   }finally{close();}
 });
@@ -116,7 +118,7 @@ test('the inbox refuses other sites, unknown or malformed ids and anything that 
     assert.equal((await post(JSON.stringify({image:IMAGE,context:[1]}))).status,400);
     for(const id of ['..%2F..%2Fescape','2026-11-03_18-42-07','%E0%A4%A'])
       assert.equal((await voice(base,id)).status,404);
-    assert.ok(!existsSync(root),'nothing was written');
+    assert.deepEqual(readdirSync(root).filter(n=>!n.startsWith('.')),[],'no take was written');
     assert.equal((await fetch(`${base}/api/feedback/nope`)).status,404);
     assert.equal((await fetch(`${base}/api/feedbackish`)).status,418,'paths outside the base go to the next handler');
     const {id}=await view(base).then(r=>r.json()) as {id:string};
@@ -285,7 +287,7 @@ test('the listen route transcribes the recording so far from a given second, whe
     assert.deepEqual(await (await listen('')).json(),{text:'take a screenshot'});
     assert.deepEqual(heard,[{audio:'so far',type:'audio/webm',from:3.5},{audio:'so far',type:'audio/webm',from:0}]);
     assert.equal((await listen('','text/plain')).status,400);
-    assert.ok(!existsSync(root),'nothing is stored');
+    assert.deepEqual(readdirSync(root).filter(n=>!n.startsWith('.')),[],'no take is stored');
   }finally{close();}
   const none=await inbox({transcribe:async()=>'text only'});
   try{

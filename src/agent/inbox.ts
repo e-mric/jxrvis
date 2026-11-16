@@ -144,12 +144,25 @@ export class TakeTracker{
   }
 }
 
+// Control characters (C0, DEL, C1), the line and paragraph separators, and the bidirectional marks and overrides.
+const UNSAFE=new RegExp(`[${[[0x00,0x1f],[0x7f,0x9f],[0x200e,0x200f],[0x2028,0x2029],[0x202a,0x202e],[0x2066,0x2069]].map(([a,b])=>`${String.fromCharCode(a)}-${String.fromCharCode(b)}`).join('')}]`,'g');
+
+/**
+ * Text from a take as one safe line: no line breaks (a fake second FEEDBACK line), no terminal escapes, no
+ * control or bidirectional characters, and at most `max` characters.
+ */
+export function oneLine(text:string,max=Infinity){
+  const line=text.replace(UNSAFE,' ').replace(/\s+/g,' ').trim();
+  return line.length>max?`${line.slice(0,max-3)}...`:line;
+}
+
 /** The watcher's one line for a take: `FEEDBACK <id> [summary]: what was said`. */
 export function describe(take:Take){
-  const said=(take.transcript!==null?(take.transcript||'(silence)')
-    :take.voice?`(no transcript: listen to ${take.voice})`:'(no voice: view and context only)').replace(/\s+/g,' ');
+  const said=oneLine(take.transcript!==null?(take.transcript||'(silence)')
+    :take.voice?`(no transcript: listen to ${take.voice})`:'(no voice: view and context only)');
   const more=take.views.length>1?` (+${take.views.length-1} screenshot${take.views.length>2?'s':''})`:'';
+  const summary=take.summary?oneLine(take.summary,200):'',question=take.question?oneLine(take.question,200):'';
   // An answer to the agent's question: carry on with the asking take, which the headset follows.
-  if(take.replyTo)return `ANSWER ${take.id} to ${take.replyTo}${take.question?` [${take.question}]`:''}${more}: ${said}`;
-  return `FEEDBACK ${take.id}${take.summary?` [${take.summary}]`:''}${more}: ${said}`;
+  if(take.replyTo)return `ANSWER ${take.id} to ${take.replyTo}${question?` [${question}]`:''}${more}: ${said}`;
+  return `FEEDBACK ${take.id}${summary?` [${summary}]`:''}${more}: ${said}`;
 }

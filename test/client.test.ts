@@ -43,7 +43,7 @@ async function loop(options:Partial<ClientOptions>={},transcribe:any=async()=>'t
     timing:{lookUp:.05,shortest:.02,longest:5,followEvery:.02,followFor:5},
     ...options,
   });
-  const takes=()=>{try{return readdirSync(root).filter(n=>n!=='.gitignore');}catch{return [];}};
+  const takes=()=>{try{return readdirSync(root).filter(n=>!n.startsWith('.'));}catch{return [];}};
   return {root,client,shown,sounds,changes,recorders,takes,snaps:()=>snaps,close:()=>{client.dispose();server.close();}};
 }
 const until=async(check:()=>boolean,what:string,ms=3000)=>{const end=Date.now()+ms;while(!check()){if(Date.now()>end)throw new Error(`timed out waiting for ${what}`);await sleep(5);}};
@@ -300,7 +300,7 @@ test('saying "take a screenshot" while recording takes one view per phrase, list
     await until(()=>calls>=5,'more listening');
     client.release();
     await until(()=>shown.some(s=>s.startsWith('Saved')),'saved');
-    const [id]=readdirSync(root).filter(n=>n!=='.gitignore');
+    const [id]=readdirSync(root).filter(n=>!n.startsWith('.'));
     const views=JSON.parse(readFileSync(join(root,id,'views.json'),'utf8'));
     assert.deepEqual(views.map((v:{trigger:string})=>v.trigger),['start','voice'],'one phrase, one view');
     assert.equal(froms[0],0);
